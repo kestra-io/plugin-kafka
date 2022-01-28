@@ -15,8 +15,8 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.serialization.Serializer;
-import org.slf4j.Logger;
 
 import javax.validation.constraints.NotNull;
 
@@ -57,7 +57,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Source of message send",
-        description = "Source of message:\n"+
+        description = "Source of message:\n" +
             "Can be a unique entry, a file or a list\n" +
             "with the following format: key, value, timestamp, headers"
     )
@@ -65,25 +65,26 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @PluginProperty(dynamic = true)
     private Object from;
 
+
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Serializer use for the key",
-        description = "Serializer use for the key, can be:\n"+
-                "String, Integer, Float, Double, Long, Short, ByteArray, ByteBuffer, Bytes, UUID, Void, AVRO, JSON\n" +
-                "List are not handled."
+        description = "Serializer use for the key, can be:\n" +
+            "String, Integer, Float, Double, Long, Short, ByteArray, ByteBuffer, Bytes, UUID, Void, AVRO, JSON\n" +
+            "List are not handled."
     )
     @NotNull
     @PluginProperty(dynamic = true)
-    private String keySerializer;
+    private SerializerType keySerializer;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Serializer use for the value",
-        description = "Serializer use for the value, can be:\n"+
-                "String, Integer, Float, Double, Long, Short, ByteArray, ByteBuffer, Bytes, UUID, Void, AVRO, JSON\n" +
-                "List are not handled."
+        description = "Serializer use for the value, can be:\n" +
+            "String, Integer, Float, Double, Long, Short, ByteArray, ByteBuffer, Bytes, UUID, Void, AVRO, JSON\n" +
+            "List are not handled."
     )
     @NotNull
     @PluginProperty(dynamic = true)
-    private String valueSerializer;
+    private SerializerType valueSerializer;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Schema if key is AVRO type"
@@ -104,10 +105,9 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @Builder.Default
     private Integer chunk = 50;
 
+    @SuppressWarnings("unchecked")
     @Override
     public Output run(RunContext runContext) throws Exception {
-        Logger logger = runContext.logger();
-        Long count = 1L;
 
         Properties props = this.createProperties(this.properties, runContext);
         Properties config = this.createProperties(this.serializerConfig, runContext);
@@ -118,43 +118,47 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         keySerial.configure(config, true);
         valSerial.configure(config, false);
 
-        KafkaProducer producer = new KafkaProducer<>(props, keySerial, valSerial);
+        KafkaProducer<Object, Object> producer = new KafkaProducer<Object, Object>(props, keySerial, valSerial);
+
+        Integer count = 1;
 
         if (this.from instanceof String || this.from instanceof List) {
             Flowable<Object> flowable;
+            Flowable<Integer> resultFlowable;
             if (this.from instanceof String) {
                 URI from = new URI(runContext.render((String) this.from));
-                try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.uriToInputStream(from))))
-                {
+                try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.uriToInputStream(from)))) {
                     flowable = Flowable.create(FileSerde.reader(inputStream), BackpressureStrategy.BUFFER);
-                    flowable = this.buildFlowable(flowable, runContext, producer);
-                    count = flowable
-                        .count()
+                    resultFlowable = this.buildFlowable(flowable, runContext, producer);
+
+                    count = resultFlowable
+                        .reduce(Integer::sum)
                         .blockingGet();
                 }
             } else {
-                flowable = Flowable.fromArray(((List) this.from).toArray());
-                flowable = this.buildFlowable(flowable, runContext, producer);
-                count = flowable
-                    .count()
+                flowable = Flowable.fromArray(((List<Object>) this.from).toArray());
+                resultFlowable = this.buildFlowable(flowable, runContext, producer);
+
+                count = resultFlowable
+                    .reduce(Integer::sum)
                     .blockingGet();
             }
         } else {
             Object key;
             Object value;
 
-            Map<Object, Object> map = (Map) this.from;
-            if (this.keySerializer == "AVRO") {
-                key = buildAvroRecord(runContext, this.avroKeySchema, (Map) map.get("key"));
+            Map<String, Object> map = (Map<String, Object>) this.from;
+            if (this.keySerializer == SerializerType.AVRO) {
+                key = buildAvroRecord(runContext, this.avroKeySchema, (Map<String, Object>) map.get("key"));
             } else {
                 key = map.get("key");
             }
-            if (this.valueSerializer == "AVRO") {
-                value = buildAvroRecord(runContext, this.avroValueSchema, (Map) map.get("value"));
+            if (this.valueSerializer == SerializerType.AVRO) {
+                value = buildAvroRecord(runContext, this.avroValueSchema, (Map<String, Object>) map.get("value"));
             } else {
                 value = map.get("value");
             }
-            producer.send(new ProducerRecord(this.topic, this.partition, (Long) map.get("timestamp"), key, value, (Iterable) map.get("headers")));
+            producer.send(new ProducerRecord<>(this.topic, this.partition, (Long) map.get("timestamp"), key, value, (Iterable<Header>) map.get("headers")));
         }
         producer.flush();
         producer.close();
@@ -162,37 +166,38 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         return Output.builder().messageProduce(count).build();
     }
 
-    private GenericRecord buildAvroRecord(RunContext runContext, String dataSchema, Map map) throws Exception {
+    private GenericRecord buildAvroRecord(RunContext runContext, String dataSchema, Map<String, Object> map) throws Exception {
         Schema.Parser parser = new Schema.Parser();
         Schema schema = parser.parse(runContext.render(dataSchema));
         GenericRecord avroRecord = new GenericData.Record(schema);
-        Map<String, Object> keyMap = map;
-        for (String k : keyMap.keySet()) {
-            avroRecord.put(k, keyMap.get(k));
+        for (String k : map.keySet()) {
+            avroRecord.put(k, map.get(k));
         }
         return avroRecord;
     }
 
-    private Flowable buildFlowable(Flowable flowable, RunContext runContext, KafkaProducer producer){
-        Flowable newFlowable = flowable.buffer(this.chunk, this.chunk)
+    @SuppressWarnings("unchecked")
+    private Flowable<Integer> buildFlowable(Flowable<Object> flowable, RunContext runContext, KafkaProducer<Object, Object> producer) {
+        Flowable<Integer> newFlowable;
+        newFlowable = flowable.buffer(this.chunk, this.chunk)
             .map(list -> {
                 Object key;
                 Object value;
-                for(Object row : (List) list) {
-                    Map map = (Map) row;
-                    if (this.keySerializer == "AVRO") {
-                        key = buildAvroRecord(runContext, this.avroKeySchema, (Map) map.get("key"));
+                for (Object row : list) {
+                    Map<String, Object> map = (Map<String, Object>) row;
+                    if (this.keySerializer == SerializerType.AVRO) {
+                        key = buildAvroRecord(runContext, this.avroKeySchema, (Map<String, Object>) map.get("key"));
                     } else {
                         key = map.get("key");
                     }
-                    if (this.valueSerializer == "AVRO") {
-                        value = buildAvroRecord(runContext, this.avroValueSchema, (Map) map.get("value"));
+                    if (this.valueSerializer == SerializerType.AVRO) {
+                        value = buildAvroRecord(runContext, this.avroValueSchema, (Map<String, Object>) map.get("value"));
                     } else {
                         value = map.get("value");
                     }
-                    producer.send(new ProducerRecord(this.topic, this.partition, (Long) map.get("timestamp"), key, value, (Iterable) map.get("headers")));
+                    producer.send(new ProducerRecord<>(this.topic, this.partition, (Long) map.get("timestamp"), key, value, (Iterable<Header>) map.get("headers")));
                 }
-                return 0;
+                return list.size();
             });
         return newFlowable;
     }
@@ -203,7 +208,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         @io.swagger.v3.oas.annotations.media.Schema(
             title = "Number of message produced"
         )
-        private final Long messageProduce;
+        private final Integer messageProduce;
     }
 
 

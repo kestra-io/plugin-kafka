@@ -24,6 +24,9 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Stream;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+
 @MicronautTest
 public class KafkaTest {
     @Inject
@@ -65,14 +68,15 @@ public class KafkaTest {
             .properties(mapProperties)
             .serializerConfig(configProperties)
             .avroValueSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
-            .keySerializer("String")
-            .valueSerializer("AVRO")
+            .keySerializer(AbstractKafkaConnection.SerializerType.String)
+            .valueSerializer(AbstractKafkaConnection.SerializerType.AVRO)
             .topic("newTopic")
             .partition(0)
             .from(uri.toString())
             .build();
 
         Produce.Output runOutput = task.run(runContext);
+        assertThat(runOutput.getMessageProduce(), is(50));
     }
 
     @Test
@@ -89,8 +93,8 @@ public class KafkaTest {
             .properties(mapProperties)
             .serializerConfig(configProperties)
             .avroValueSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
-            .keySerializer("String")
-            .valueSerializer("AVRO")
+            .keySerializer(AbstractKafkaConnection.SerializerType.String)
+            .valueSerializer(AbstractKafkaConnection.SerializerType.AVRO)
             .topic("testTopic")
             .partition(0)
             .from(ImmutableMap.builder()
@@ -106,6 +110,7 @@ public class KafkaTest {
             .build();
 
         Produce.Output runOutput = task.run(runContext);
+        assertThat(runOutput.getMessageProduce(), is(1));
     }
 
     static Stream<Arguments> sourceAsMap() {
@@ -121,35 +126,35 @@ public class KafkaTest {
         map.put("timestamp", Instant.now().toEpochMilli());
 
         return Stream.of(
-            Arguments.of("String", "Integer", ImmutableMap.builder()
+            Arguments.of(AbstractKafkaConnection.SerializerType.String, AbstractKafkaConnection.SerializerType.Integer, ImmutableMap.builder()
                 .put("key", "string")
                 .put("value", 1)
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of("Double", "Long", ImmutableMap.builder()
+            Arguments.of(AbstractKafkaConnection.SerializerType.Double, AbstractKafkaConnection.SerializerType.Long, ImmutableMap.builder()
                 .put("key", 1.2D)
                 .put("value", 1L)
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
 //            Used to test null value insertion
-            Arguments.of("String", "String", map),
-            Arguments.of("Short", "ByteArray", ImmutableMap.builder()
+            Arguments.of(AbstractKafkaConnection.SerializerType.String, AbstractKafkaConnection.SerializerType.String, map),
+            Arguments.of(AbstractKafkaConnection.SerializerType.Short, AbstractKafkaConnection.SerializerType.ByteArray, ImmutableMap.builder()
                 .put("key", (short) 5)
                 .put("value", new byte[]{0b000101})
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of("ByteBuffer", "UUID", ImmutableMap.builder()
+            Arguments.of(AbstractKafkaConnection.SerializerType.ByteBuffer, AbstractKafkaConnection.SerializerType.UUID, ImmutableMap.builder()
                 .put("key", ByteBuffer.allocate(10))
                 .put("value", UUID.randomUUID())
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of("JSON", "Void",mapVoid)
+            Arguments.of(AbstractKafkaConnection.SerializerType.JSON, AbstractKafkaConnection.SerializerType.Void,mapVoid)
         );
     }
 
     @ParameterizedTest
     @MethodSource("sourceAsMap")
-    void fromAsMap(String keySerializer, String valueSerializer, Map from) throws Exception {
+    void fromAsMap(AbstractKafkaConnection.SerializerType keySerializer, AbstractKafkaConnection.SerializerType valueSerializer, Map<Object,Object> from) throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
 
         Map<String, String> mapProperties = new LinkedHashMap<>();
@@ -169,6 +174,8 @@ public class KafkaTest {
             .build();
 
         Produce.Output runOutput = task.run(runContext);
+
+        assertThat(runOutput.getMessageProduce(), is(1));
     }
 
     @Test
@@ -185,8 +192,8 @@ public class KafkaTest {
             .properties(mapProperties)
             .serializerConfig(configProperties)
             .avroValueSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
-            .keySerializer("String")
-            .valueSerializer("AVRO")
+            .keySerializer(AbstractKafkaConnection.SerializerType.String)
+            .valueSerializer(AbstractKafkaConnection.SerializerType.AVRO)
             .topic("lastTopic")
             .partition(0)
             .from(List.of(
@@ -212,5 +219,7 @@ public class KafkaTest {
             .build();
 
         Produce.Output runOutput = task.run(runContext);
+
+        assertThat(runOutput.getMessageProduce(), is(2));
     }
 }

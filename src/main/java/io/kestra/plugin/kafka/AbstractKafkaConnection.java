@@ -35,6 +35,23 @@ public abstract class AbstractKafkaConnection extends Task {
         @Builder.Default
         protected Map<String, String> serializerConfig = Collections.emptyMap();
 
+
+        protected enum SerializerType {
+            String,
+            Integer,
+            Float,
+            Double,
+            Long,
+            Short,
+            ByteArray,
+            ByteBuffer,
+            Bytes,
+            UUID,
+            Void,
+            AVRO,
+            JSON
+        }
+
     protected Properties createProperties(Map<String,String> mapProperties, RunContext runContext) throws Exception {
         Properties properties = new Properties();
 
@@ -44,34 +61,34 @@ public abstract class AbstractKafkaConnection extends Task {
         return properties;
     }
 
-    protected Serializer getTypedSerializer(String s) throws Exception{
+    protected Serializer getTypedSerializer(SerializerType s) throws Exception{
         switch(s){
-            case "String":
+            case String:
                 return new StringSerializer();
-            case "Integer":
+            case Integer:
                 return new IntegerSerializer();
-            case "Float":
+            case Float:
                 return new FloatSerializer();
-            case "Double":
+            case Double:
                 return new DoubleSerializer();
-            case "Long":
+            case Long:
                 return new LongSerializer();
-            case "Short":
+            case Short:
                 return new ShortSerializer();
-            case "ByteArray":
+            case ByteArray:
                 return new ByteArraySerializer();
-            case "ByteBuffer":
+            case ByteBuffer:
                 return new ByteBufferSerializer();
-            case "Bytes":
+            case Bytes:
                 return new BytesSerializer();
-            case "UUID":
+            case UUID:
                 return new UUIDSerializer();
-            case "Void":
+            case Void:
                 return new VoidSerializer();
-            case "AVRO":
+            case AVRO:
                 return new KafkaAvroSerializer();
-            case "JSON":
-                return new KafkaJsonSerializer();
+            case JSON:
+                return new KafkaJsonSerializer<>();
             default:
                 throw new Exception();
         }
