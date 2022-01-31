@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableMap;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.utils.IdUtils;
+import io.micronaut.context.annotation.Value;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import org.junit.jupiter.params.ParameterizedTest;
 import io.kestra.core.runners.RunContext;
@@ -35,16 +36,15 @@ public class KafkaTest {
     @Inject
     private StorageInterface storageInterface;
 
+    @Value("${kafka.bootstrap}")
+    private String bootstrap;
+
+    @Value("${kafka.registry}")
+    private String registry;
 
     @Test
     void fromAsString() throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
-
-        Map<String, String> mapProperties = new LinkedHashMap<>();
-        mapProperties.put("bootstrap.servers", "localhost:9092");
-
-        Map<String, String> configProperties = new LinkedHashMap<>();
-        configProperties.put("schema.registry.url", "http://localhost:8085");
 
         File tempFile = File.createTempFile(this.getClass().getSimpleName().toLowerCase() + "_", ".trs");
         OutputStream output = new FileOutputStream(tempFile);
@@ -65,38 +65,30 @@ public class KafkaTest {
         URI uri = storageInterface.put(URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = Produce.builder()
-            .properties(mapProperties)
-            .serializerConfig(configProperties)
-            .avroValueSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
-            .keySerializer(AbstractKafkaConnection.SerializerType.String)
-            .valueSerializer(AbstractKafkaConnection.SerializerType.AVRO)
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .serdeProperties(Map.of("schema.registry.url", this.registry))
+            .valueAvroSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.AVRO)
             .topic("newTopic")
-            .partition(0)
             .from(uri.toString())
             .build();
 
         Produce.Output runOutput = task.run(runContext);
-        assertThat(runOutput.getMessageProduce(), is(50));
+        assertThat(runOutput.getMessagesCount(), is(50));
     }
 
     @Test
     void fromAsMapAvro() throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
 
-        Map<String, String> mapProperties = new LinkedHashMap<>();
-        mapProperties.put("bootstrap.servers", "localhost:9092");
-
-        Map<String, String> configProperties = new LinkedHashMap<>();
-        configProperties.put("schema.registry.url", "http://localhost:8085");
-
         Produce task = Produce.builder()
-            .properties(mapProperties)
-            .serializerConfig(configProperties)
-            .avroValueSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
-            .keySerializer(AbstractKafkaConnection.SerializerType.String)
-            .valueSerializer(AbstractKafkaConnection.SerializerType.AVRO)
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .serdeProperties(Map.of("schema.registry.url", this.registry))
+            .valueAvroSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.AVRO)
             .topic("testTopic")
-            .partition(0)
             .from(ImmutableMap.builder()
                 .put("key", "string")
                 .put("value", Map.of(
@@ -110,92 +102,80 @@ public class KafkaTest {
             .build();
 
         Produce.Output runOutput = task.run(runContext);
-        assertThat(runOutput.getMessageProduce(), is(1));
+        assertThat(runOutput.getMessagesCount(), is(1));
     }
 
     static Stream<Arguments> sourceAsMap() {
-//        Map to test null value in not Void serializer
+        // Map to test null value in not Void serializer
         HashMap<String, Object> map = new HashMap<>();
         map.put("key", "string");
         map.put("value", null);
         map.put("timestamp", Instant.now().toEpochMilli());
-//        Map to test Void serializer
+
+        // Map to test Void serializer
         HashMap<String, Object> mapVoid = new HashMap<>();
         map.put("key", "{\"Test\":\"OK\"}");
         map.put("value", null);
         map.put("timestamp", Instant.now().toEpochMilli());
 
         return Stream.of(
-            Arguments.of(AbstractKafkaConnection.SerializerType.String, AbstractKafkaConnection.SerializerType.Integer, ImmutableMap.builder()
+            Arguments.of(SerdeType.STRING, SerdeType.INTEGER, ImmutableMap.builder()
                 .put("key", "string")
                 .put("value", 1)
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of(AbstractKafkaConnection.SerializerType.Double, AbstractKafkaConnection.SerializerType.Long, ImmutableMap.builder()
+            Arguments.of(SerdeType.DOUBLE, SerdeType.LONG, ImmutableMap.builder()
                 .put("key", 1.2D)
                 .put("value", 1L)
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-//            Used to test null value insertion
-            Arguments.of(AbstractKafkaConnection.SerializerType.String, AbstractKafkaConnection.SerializerType.String, map),
-            Arguments.of(AbstractKafkaConnection.SerializerType.Short, AbstractKafkaConnection.SerializerType.ByteArray, ImmutableMap.builder()
+
+            // Used to test null value insertion
+            Arguments.of(SerdeType.STRING, SerdeType.STRING, map),
+            Arguments.of(SerdeType.SHORT, SerdeType.BYTE_ARRAY, ImmutableMap.builder()
                 .put("key", (short) 5)
                 .put("value", new byte[]{0b000101})
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of(AbstractKafkaConnection.SerializerType.ByteBuffer, AbstractKafkaConnection.SerializerType.UUID, ImmutableMap.builder()
+            Arguments.of(SerdeType.BYTE_BUFFER, SerdeType.UUID, ImmutableMap.builder()
                 .put("key", ByteBuffer.allocate(10))
                 .put("value", UUID.randomUUID())
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of(AbstractKafkaConnection.SerializerType.JSON, AbstractKafkaConnection.SerializerType.Void,mapVoid)
+            Arguments.of(SerdeType.JSON, SerdeType.VOID,mapVoid)
         );
     }
 
     @ParameterizedTest
     @MethodSource("sourceAsMap")
-    void fromAsMap(AbstractKafkaConnection.SerializerType keySerializer, AbstractKafkaConnection.SerializerType valueSerializer, Map<Object,Object> from) throws Exception {
+    void fromAsMap(SerdeType keySerializer, SerdeType valueSerializer, Map<Object,Object> from) throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
 
-        Map<String, String> mapProperties = new LinkedHashMap<>();
-        mapProperties.put("bootstrap.servers", "localhost:9092");
-
-        Map<String, String> configProperties = new LinkedHashMap<>();
-        configProperties.put("schema.registry.url", "http://localhost:8085");
-
         Produce task = Produce.builder()
-            .properties(mapProperties)
-            .serializerConfig(configProperties)
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .serdeProperties(Map.of("schema.registry.url", this.registry))
             .keySerializer(keySerializer)
             .valueSerializer(valueSerializer)
             .topic("randomTopic")
-            .partition(0)
             .from(from)
             .build();
 
         Produce.Output runOutput = task.run(runContext);
 
-        assertThat(runOutput.getMessageProduce(), is(1));
+        assertThat(runOutput.getMessagesCount(), is(1));
     }
 
     @Test
     void fromAsArray() throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
 
-        Map<String, String> mapProperties = new LinkedHashMap<>();
-        mapProperties.put("bootstrap.servers", "localhost:9092");
-
-        Map<String, String> configProperties = new LinkedHashMap<>();
-        configProperties.put("schema.registry.url", "http://localhost:8085");
-
         Produce task = Produce.builder()
-            .properties(mapProperties)
-            .serializerConfig(configProperties)
-            .avroValueSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
-            .keySerializer(AbstractKafkaConnection.SerializerType.String)
-            .valueSerializer(AbstractKafkaConnection.SerializerType.AVRO)
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .serdeProperties(Map.of("schema.registry.url", this.registry))
+            .valueAvroSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.AVRO)
             .topic("lastTopic")
-            .partition(0)
             .from(List.of(
                 ImmutableMap.builder()
                     .put("key", "string")
@@ -220,6 +200,6 @@ public class KafkaTest {
 
         Produce.Output runOutput = task.run(runContext);
 
-        assertThat(runOutput.getMessageProduce(), is(2));
+        assertThat(runOutput.getMessagesCount(), is(2));
     }
 }

@@ -1,23 +1,6 @@
 version: "3.6"
 
 services:
-  akhq:
-    image: tchiotludo/akhq
-    environment:
-      AKHQ_CONFIGURATION: |
-        akhq:
-          connections:
-            docker-kafka-server:
-              properties:
-                bootstrap.servers: "kafka:9093"
-              schema-registry:
-                url: "http://schema-registry:8085"
-    ports:
-      - 8080:8080
-    links:
-      - kafka
-      - schema-registry
-
   zookeeper:
     image: confluentinc/cp-zookeeper:7.0.0
     environment:
@@ -45,7 +28,7 @@ services:
       - 9092:9092
 
   schema-registry:
-    image: confluentinc/cp-schema-registry
+    image: confluentinc/cp-schema-registry:7.0.0
     depends_on:
       - kafka
     environment:

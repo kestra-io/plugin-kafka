@@ -10,8 +10,10 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.common.serialization.*;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.Properties;
 import javax.validation.constraints.NotNull;
-import java.util.*;
 
 import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 
@@ -21,38 +23,21 @@ import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractKafkaConnection extends Task {
-        @Schema(
-            title="Connection properties"
-        )
-        @PluginProperty(dynamic = true)
-        @NotNull
-        protected Map<String, String> properties;
+    @Schema(
+        title = "Connection properties"
+    )
+    @PluginProperty(dynamic = true)
+    @NotNull
+    protected Map<String, String> properties;
 
-        @Schema(
-            title="Serializer configuration"
-        )
-        @PluginProperty(dynamic = true)
-        @Builder.Default
-        protected Map<String, String> serializerConfig = Collections.emptyMap();
+    @Schema(
+        title="Serializer configuration"
+    )
+    @PluginProperty(dynamic = true)
+    @Builder.Default
+    protected Map<String, String> serdeProperties = Collections.emptyMap();
 
-
-        protected enum SerializerType {
-            String,
-            Integer,
-            Float,
-            Double,
-            Long,
-            Short,
-            ByteArray,
-            ByteBuffer,
-            Bytes,
-            UUID,
-            Void,
-            AVRO,
-            JSON
-        }
-
-    protected Properties createProperties(Map<String,String> mapProperties, RunContext runContext) throws Exception {
+    protected Properties createProperties(Map<String, String> mapProperties, RunContext runContext) throws Exception {
         Properties properties = new Properties();
 
         mapProperties
@@ -61,29 +46,29 @@ public abstract class AbstractKafkaConnection extends Task {
         return properties;
     }
 
-    protected Serializer getTypedSerializer(SerializerType s) throws Exception{
-        switch(s){
-            case String:
+    protected Serializer<?> getTypedSerializer(SerdeType s) throws Exception {
+        switch (s) {
+            case STRING:
                 return new StringSerializer();
-            case Integer:
+            case INTEGER:
                 return new IntegerSerializer();
-            case Float:
+            case FLOAT:
                 return new FloatSerializer();
-            case Double:
+            case DOUBLE:
                 return new DoubleSerializer();
-            case Long:
+            case LONG:
                 return new LongSerializer();
-            case Short:
+            case SHORT:
                 return new ShortSerializer();
-            case ByteArray:
+            case BYTE_ARRAY:
                 return new ByteArraySerializer();
-            case ByteBuffer:
+            case BYTE_BUFFER:
                 return new ByteBufferSerializer();
-            case Bytes:
+            case BYTES:
                 return new BytesSerializer();
             case UUID:
                 return new UUIDSerializer();
-            case Void:
+            case VOID:
                 return new VoidSerializer();
             case AVRO:
                 return new KafkaAvroSerializer();
@@ -93,5 +78,4 @@ public abstract class AbstractKafkaConnection extends Task {
                 throw new Exception();
         }
     }
-
 }
