@@ -7,3 +7,6 @@ kestra:
     type: local
     local:
       base-path: /tmp/unittest
+kafka:
+  bootstrap: localhost:9092
+  registry: http://localhost:8085

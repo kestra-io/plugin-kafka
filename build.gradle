@@ -15,6 +15,7 @@ def isBuildSnapshot = version.toString().endsWith("-SNAPSHOT")
 
 repositories {
     mavenCentral()
+    maven { url "https://packages.confluent.io/maven/" }
     if (isBuildSnapshot) {
         maven { url "https://s01.oss.sonatype.org/content/repositories/snapshots/" }
     }
@@ -22,7 +23,7 @@ repositories {
 
 sourceCompatibility = 11
 group "io.kestra.plugin"
-description 'Plugin template for Kestra'
+description 'Plugin Kafka for Kestra'
 
 tasks.withType(JavaCompile) {
     options.encoding = "UTF-8"
@@ -46,7 +47,11 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
 
     // libs included in the final jar
-    api group: 'com.google.code.gson', name: 'gson', version: '2.8.9'
+    api group: "org.apache.kafka", name: "kafka-clients", version: kafkaVersion
+    api group: "io.confluent", name: "kafka-schema-registry-client", version: confluentVersion
+    api group: "io.confluent", name: "kafka-avro-serializer", version: confluentVersion
+    api group: "io.confluent", name: "kafka-protobuf-serializer", version: confluentVersion
+    api group: "io.confluent", name: "kafka-json-serializer", version: confluentVersion
 }
 
 
@@ -71,6 +76,7 @@ dependencies {
     testAnnotationProcessor "io.micronaut:micronaut-inject-java"
     testImplementation platform("io.micronaut:micronaut-bom:$micronautVersion")
     testImplementation "io.micronaut.test:micronaut-test-junit5"
+    testImplementation "org.junit.jupiter:junit-jupiter-params"
 
     // test deps needed only for to have a runner
     testImplementation group: "io.kestra", name: "core", version: kestraVersion
@@ -102,7 +108,7 @@ jar {
     manifest {
         attributes(
                 "X-Kestra-Title": project.name,
-                "X-Kestra-Group": project.group + ".templates",
+                "X-Kestra-Group": project.group + ".kafka",
                 "X-Kestra-Description": project.description,
                 "X-Kestra-Version": project.version
         )
