@@ -7,6 +7,7 @@ import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
+import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
 import lombok.*;
@@ -139,11 +140,11 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
-        Properties properties = this.createProperties(this.properties, runContext);
-        Properties serdesProperties = this.createProperties(this.serdeProperties, runContext);
+        Properties properties = createProperties(this.properties, runContext);
+        Properties serdesProperties = createProperties(this.serdeProperties, runContext);
 
-        Serializer keySerial = this.getTypedSerializer(this.keySerializer);
-        Serializer valSerial = this.getTypedSerializer(this.valueSerializer);
+        Serializer keySerial = getTypedSerializer(this.keySerializer);
+        Serializer valSerial = getTypedSerializer(this.valueSerializer);
 
         keySerial.configure(serdesProperties, true);
         valSerial.configure(serdesProperties, false);

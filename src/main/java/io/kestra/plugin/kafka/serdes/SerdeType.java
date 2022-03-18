@@ -1,4 +1,4 @@
-package io.kestra.plugin.kafka;
+package io.kestra.plugin.kafka.serdes;
 
 @io.swagger.v3.oas.annotations.media.Schema(
     title = "Serializer / Deserializer use for the value",

@@ -1,10 +1,14 @@
 package io.kestra.plugin.kafka;
 
-import io.confluent.kafka.serializers.KafkaAvroSerializer;
+import io.confluent.kafka.serializers.KafkaAvroDeserializer;
+import io.confluent.kafka.serializers.KafkaJsonDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.serdes.GenericRecordToMapDeserializer;
+import io.kestra.plugin.kafka.serdes.KafkaAvroSerializer;
+import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
@@ -24,20 +28,25 @@ import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 @NoArgsConstructor
 public abstract class AbstractKafkaConnection extends Task {
     @Schema(
-        title = "Connection properties"
+        title = "Connection properties",
+        description = "`bootstrap.servers` is a minimal required configuration.\n" +
+            "Can be any valid [Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) or " +
+            "[Producer Configs\n](https://kafka.apache.org/documentation/#producerconfigs) "
     )
     @PluginProperty(dynamic = true)
     @NotNull
     protected Map<String, String> properties;
 
     @Schema(
-        title="Serializer configuration"
+        title="Serializer configuration",
+        description = "Configuration that will be passed to serializer or deserializer, you typically may need to use ``\n" +
+            "`avro.use.logical.type.converters` is always passed with `true` value."
     )
     @PluginProperty(dynamic = true)
     @Builder.Default
     protected Map<String, String> serdeProperties = Collections.emptyMap();
 
-    protected Properties createProperties(Map<String, String> mapProperties, RunContext runContext) throws Exception {
+    protected static Properties createProperties(Map<String, String> mapProperties, RunContext runContext) throws Exception {
         Properties properties = new Properties();
 
         mapProperties
@@ -46,7 +55,7 @@ public abstract class AbstractKafkaConnection extends Task {
         return properties;
     }
 
-    protected Serializer<?> getTypedSerializer(SerdeType s) throws Exception {
+    protected static Serializer<?> getTypedSerializer(SerdeType s) throws Exception {
         switch (s) {
             case STRING:
                 return new StringSerializer();
@@ -74,6 +83,39 @@ public abstract class AbstractKafkaConnection extends Task {
                 return new KafkaAvroSerializer();
             case JSON:
                 return new KafkaJsonSerializer<>();
+            default:
+                throw new Exception();
+        }
+    }
+
+    protected static Deserializer<?> getTypedDeserializer(SerdeType s) throws Exception {
+        switch (s) {
+            case STRING:
+                return new StringDeserializer();
+            case INTEGER:
+                return new IntegerDeserializer();
+            case FLOAT:
+                return new FloatDeserializer();
+            case DOUBLE:
+                return new DoubleDeserializer();
+            case LONG:
+                return new LongDeserializer();
+            case SHORT:
+                return new ShortDeserializer();
+            case BYTE_ARRAY:
+                return new ByteArrayDeserializer();
+            case BYTE_BUFFER:
+                return new ByteBufferDeserializer();
+            case BYTES:
+                return new BytesDeserializer();
+            case UUID:
+                return new UUIDDeserializer();
+            case VOID:
+                return new VoidDeserializer();
+            case AVRO:
+                return new GenericRecordToMapDeserializer(new KafkaAvroDeserializer());
+            case JSON:
+                return new KafkaJsonDeserializer<>();
             default:
                 throw new Exception();
         }
