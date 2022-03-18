@@ -4,7 +4,6 @@ import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -31,7 +30,6 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
-import javax.validation.constraints.NotNull;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
 
@@ -49,64 +47,29 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
             code = {
                 "topic: test_kestra",
                 "properties:",
-                "  bootstrap.servers: local:9092",
+                "  bootstrap.servers: localhost:9092",
                 "serdeProperties:",
-                "  schema.registry.url: http://local:8085",
-                "keySerializer: STRING",
-                "valueSerializer: AVRO\n",
+                "  schema.registry.url: http://localhost:8085",
+                "keyDeserializer: STRING",
+                "valueDeserializer: AVRO",
                 "valueAvroSchema: |",
                 "  {\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"io.kestra.examples\",\"fields\":[{\"name\":\"username\",\"type\":\"string\"},{\"name\":\"tweet\",\"type\":\"string\"}]}"
             }
         )
     }
 )
-public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output> {
-    @Schema(
-        title = "Kafka topic where to send message",
-        description = "Can be a string or a List of string to consume from multiple topic"
-    )
-    @NotNull
-    @PluginProperty(dynamic = true)
+public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output>, ConsumeInterface {
     private Object topic;
 
-    @Schema(
-        title = "The consumer group",
-        description = "Using consumer group, we will fetch only records not already consumed"
-    )
-    @PluginProperty(dynamic = true)
     private String groupId;
 
-    @Schema(
-        title = "Serializer used for the key"
-    )
-    @NotNull
-    @PluginProperty(dynamic = true)
     private SerdeType keyDeserializer;
 
-    @Schema(
-        title = "Serializer used for the value"
-    )
-    @NotNull
-    @PluginProperty(dynamic = true)
     private SerdeType valueDeserializer;
 
-    @Schema(
-        title = "Timestamp of message to start with",
-        description = "By default, we consume all messages from the topics with no consumer group or depending on " +
-            "configuration `auto.offset.reset` with consumer group, but you can provide a arbitrary start time.\n" +
-            "This property is ignore if a consumer group is used.\n" +
-            "Must be a valid iso 8601 date."
-    )
-    @PluginProperty(dynamic = true)
     private String since;
 
-    @Schema(
-        title = "Duration waiting for record to be polled",
-        description = "If no records are available, the max wait to wait for a new records. "
-    )
-    @NotNull
     @Builder.Default
-    @PluginProperty(dynamic = true)
     private Duration pollDuration = Duration.ofSeconds(2);
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -180,15 +143,18 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     }
 
     @SuppressWarnings("unchecked")
-    private void affectTopics(RunContext runContext, KafkaConsumer<Object, Object> consumer) throws IllegalVariableEvaluationException {
-        Collection<String> topics;
+    Collection<String> topics(RunContext runContext) throws IllegalVariableEvaluationException {
         if (this.topic instanceof String) {
-            topics = List.of(runContext.render((String) this.topic));
+            return List.of(runContext.render((String) this.topic));
         } else if (this.topic instanceof List) {
-            topics = runContext.render((List<String>) this.topic);
+            return runContext.render((List<String>) this.topic);
         } else {
             throw new IllegalArgumentException("Invalid topics with type '" + this.topic.getClass().getName() + "'");
         }
+    }
+
+    private void affectTopics(RunContext runContext, KafkaConsumer<Object, Object> consumer) throws IllegalVariableEvaluationException {
+        Collection<String> topics = this.topics(runContext);
 
         if (this.groupId != null) {
             consumer.subscribe(topics);

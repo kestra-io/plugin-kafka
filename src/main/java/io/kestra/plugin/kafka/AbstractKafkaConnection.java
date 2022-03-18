@@ -3,21 +3,21 @@ package io.kestra.plugin.kafka;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.GenericRecordToMapDeserializer;
 import io.kestra.plugin.kafka.serdes.KafkaAvroSerializer;
 import io.kestra.plugin.kafka.serdes.SerdeType;
-import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.*;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.common.serialization.*;
 
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
-import javax.validation.constraints.NotNull;
 
 import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 
@@ -26,24 +26,9 @@ import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-public abstract class AbstractKafkaConnection extends Task {
-    @Schema(
-        title = "Connection properties",
-        description = "`bootstrap.servers` is a minimal required configuration.\n" +
-            "Can be any valid [Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) or " +
-            "[Producer Configs\n](https://kafka.apache.org/documentation/#producerconfigs) "
-    )
-    @PluginProperty(dynamic = true)
-    @NotNull
+public abstract class AbstractKafkaConnection extends Task implements KafkaConnectionInterface {
     protected Map<String, String> properties;
 
-    @Schema(
-        title="Serializer configuration",
-        description = "Configuration that will be passed to serializer or deserializer, you typically may need to use ``\n" +
-            "`avro.use.logical.type.converters` is always passed with `true` value."
-    )
-    @PluginProperty(dynamic = true)
-    @Builder.Default
     protected Map<String, String> serdeProperties = Collections.emptyMap();
 
     protected static Properties createProperties(Map<String, String> mapProperties, RunContext runContext) throws Exception {

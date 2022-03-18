@@ -1,0 +1,20 @@
+id: trigger
+namespace: io.kestra.tests
+
+triggers:
+  - id: watch
+    type: io.kestra.plugin.kafka.Trigger
+    interval: PT10S
+    topic: tu_trigger
+    properties:
+      bootstrap.servers: localhost:9092
+    serdeProperties:
+      schema.registry.url: http://localhost:8085
+    keyDeserializer: STRING
+    valueDeserializer: STRING
+
+
+tasks:
+  - id: end
+    type: io.kestra.core.tasks.debugs.Return
+    format: "{{task.id}} > {{taskrun.startDate}}"
