@@ -105,7 +105,12 @@ public class GenericRecordToMapDeserializer implements Deserializer<Object> {
             .stream()
             .filter(type -> {
                 try {
-                    return GenericData.get().validate(type, value);
+                    // logical type is already converted and validated
+                    if (type.getLogicalType() != null) {
+                        return true;
+                    } else {
+                        return GenericData.get().validate(type, value);
+                    }
                 } catch (Exception e) {
                     return  false;
                 }

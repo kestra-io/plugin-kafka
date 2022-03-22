@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.nullValue;
 
 @MicronautTest
 public class KafkaTest {
@@ -53,19 +54,20 @@ public class KafkaTest {
         OutputStream output = new FileOutputStream(tempFile);
 
         for (int i = 0; i < 50; i++) {
+            HashMap<Object, Object> data = new HashMap<>();
+            data.put("username", "Kestra-" + i);
+            data.put("tweet", "Kestra is open source");
+            data.put("timestamp", System.currentTimeMillis() / 1000);
+            data.put("instant", ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant());
+            data.put("zonedDatetimeMillis", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"));
+            data.put("zonedDatetimeMicros", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"));
+            data.put("offsetDatetimeMillis", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"));
+            data.put("offsetDatetimeMicros", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"));
+            data.put("unionLogical", i < 25 ? ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant() : null);
+
             FileSerde.write(output, ImmutableMap.builder()
                 .put("key", "key-" + i)
-                .put("value", ImmutableMap.builder()
-                    .put("username", "Kestra-" + i)
-                    .put("tweet", "Kestra is open source")
-                    .put("timestamp", System.currentTimeMillis() / 1000)
-                    .put("instant", ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant())
-                    .put("zonedDatetimeMillis", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"))
-                    .put("zonedDatetimeMicros", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"))
-                    .put("offsetDatetimeMillis", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"))
-                    .put("offsetDatetimeMicros", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"))
-                    .build()
-                )
+                .put("value", data)
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()
             );
@@ -85,7 +87,8 @@ public class KafkaTest {
                     "{\"name\":\"zonedDatetimeMillis\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-millis\"}}," +
                     "{\"name\":\"zonedDatetimeMicros\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"}}," +
                     "{\"name\":\"offsetDatetimeMillis\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-millis\"}}," +
-                    "{\"name\":\"offsetDatetimeMicros\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"}}" +
+                    "{\"name\":\"offsetDatetimeMicros\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"}}," +
+                    "{\"name\":\"unionLogical\",\"type\":[{\"type\":\"long\",\"logicalType\":\"timestamp-millis\"},\"null\"]}" +
                     "]}"
             )
             .keySerializer(SerdeType.STRING)
@@ -126,6 +129,10 @@ public class KafkaTest {
         assertThat(value.get("zonedDatetimeMicros"), is(ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant()));
         assertThat(value.get("offsetDatetimeMillis"), is(ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant()));
         assertThat(value.get("offsetDatetimeMicros"), is(ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant()));
+        assertThat(value.get("unionLogical"), is(ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant()));
+
+        value = (Map<String, Object>) result.get(49).get("value");
+        assertThat(value.get("unionLogical"), is(nullValue()));
     }
 
     @Test
