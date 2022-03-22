@@ -28,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -72,6 +73,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Builder.Default
     private Duration pollDuration = Duration.ofSeconds(2);
 
+    private Integer maxRecords;
+
+    private Duration maxDuration;
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -100,6 +105,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             this.affectTopics(runContext, consumer);
 
             Map<String, Integer> count = new HashMap<>();
+            AtomicInteger total = new AtomicInteger();
+            ZonedDateTime started = ZonedDateTime.now();
             ConsumerRecords<Object, Object> records;
             boolean empty;
 
@@ -120,10 +127,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
                     FileSerde.write(output, map);
 
+                    total.getAndIncrement();
                     count.compute(record.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
                 }));
             }
-            while (!empty);
+            while (!this.ended(empty, total, started));
 
             if (this.groupId != null) {
                 consumer.commitSync();
@@ -140,6 +148,24 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .uri(runContext.putTempFile(tempFile))
                 .build();
         }
+    }
+
+
+    @SuppressWarnings("RedundantIfStatement")
+    private boolean ended(Boolean empty, AtomicInteger count, ZonedDateTime start) {
+        if (empty) {
+            return true;
+        }
+
+        if (this.maxRecords != null && count.get() > this.maxRecords) {
+            return true;
+        }
+
+        if (this.maxDuration != null && ZonedDateTime.now().toEpochSecond() > start.plus(this.maxDuration).toEpochSecond()) {
+            return true;
+        }
+
+        return false;
     }
 
     @SuppressWarnings("unchecked")

@@ -54,6 +54,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     private Map<String, String> properties;
 
+    @Builder.Default
     private Map<String, String> serdeProperties = Collections.emptyMap();
 
     private Object topic;
@@ -68,6 +69,10 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     @Builder.Default
     private Duration pollDuration = Duration.ofSeconds(2);
+
+    private Integer maxRecords;
+
+    private Duration maxDuration;
 
     @Override
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
@@ -85,6 +90,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .valueDeserializer(this.valueDeserializer)
             .since(this.since)
             .pollDuration(this.pollDuration)
+            .maxRecords(this.maxRecords)
+            .maxDuration(this.maxDuration)
             .build();
         Consume.Output run = task.run(runContext);
 
