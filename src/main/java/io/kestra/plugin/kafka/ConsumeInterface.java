@@ -9,7 +9,7 @@ import javax.validation.constraints.NotNull;
 
 public interface ConsumeInterface {
     @Schema(
-        title = "Kafka topic where to send message",
+        title = "Kafka topic(s) where to consume message",
         description = "Can be a string or a List of string to consume from multiple topic"
     )
     @NotNull

@@ -40,7 +40,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Produce message in a Kafka topic"
+    title = "Consume messages from Kafka topic(s)"
 )
 @Plugin(
     examples = {
