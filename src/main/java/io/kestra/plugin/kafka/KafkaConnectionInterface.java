@@ -10,7 +10,11 @@ public interface KafkaConnectionInterface {
         title = "Connection properties",
         description = "`bootstrap.servers` is a minimal required configuration.\n" +
             "Can be any valid [Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) or " +
-            "[Producer Configs\n](https://kafka.apache.org/documentation/#producerconfigs) "
+            "[Producer Configs\n](https://kafka.apache.org/documentation/#producerconfigs)\n\n" +
+            "If you want to pass a truststore or a keystore, we must provide as base64 encoded string for : " +
+            "- `ssl.keystore.location` " +
+            "- `ssl.truststore.location` "
+
     )
     @PluginProperty(dynamic = true)
     @NotNull

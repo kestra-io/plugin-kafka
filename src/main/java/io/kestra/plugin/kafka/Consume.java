@@ -56,6 +56,24 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                 "valueAvroSchema: |",
                 "  {\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"io.kestra.examples\",\"fields\":[{\"name\":\"username\",\"type\":\"string\"},{\"name\":\"tweet\",\"type\":\"string\"}]}"
             }
+        ),
+        @Example(
+            title = "Connect to a cluster with ssl",
+            code = {
+                "properties:",
+                "  security.protocol: SSL",
+                "  bootstrap.servers: server.aivencloud.com:12835",
+                "  ssl.key.password: my-ssl-password",
+                "  ssl.keystore.type: PKCS12",
+                "  ssl.keystore.location: \"{{ secrets('kafka-keystore') }}\"",
+                "  ssl.keystore.password: my-ssl-password",
+                "  ssl.truststore.location: \"{{ secrets('kafka-truststore') }}\"",
+                "  ssl.truststore.password: my-ssl-password",
+                "topic:",
+                "- kestra_workerinstance",
+                "keyDeserializer: STRING",
+                "valueDeserializer: STRING"
+            }
         )
     }
 )

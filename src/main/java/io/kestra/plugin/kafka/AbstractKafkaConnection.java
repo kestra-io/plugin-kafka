@@ -10,8 +10,11 @@ import io.kestra.plugin.kafka.serdes.KafkaAvroSerializer;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.serialization.*;
 
+import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
@@ -33,7 +36,14 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
         Properties properties = new Properties();
 
         mapProperties
-            .forEach(throwBiConsumer((key, value) -> properties.put(key, runContext.render(value))));
+            .forEach(throwBiConsumer((key, value) -> {
+                if (key.equals(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG) || key.equals(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG)) {
+                    Path path = runContext.tempFile(Base64.getDecoder().decode(runContext.render(value).replace("\n", "")));
+                    properties.put(key, path.toAbsolutePath().toString());
+                } else {
+                    properties.put(key, runContext.render(value));
+                }
+            }));
 
         return properties;
     }
