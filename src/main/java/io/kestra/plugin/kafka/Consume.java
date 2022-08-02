@@ -53,8 +53,6 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                 "  schema.registry.url: http://localhost:8085",
                 "keyDeserializer: STRING",
                 "valueDeserializer: AVRO",
-                "valueAvroSchema: |",
-                "  {\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"io.kestra.examples\",\"fields\":[{\"name\":\"username\",\"type\":\"string\"},{\"name\":\"tweet\",\"type\":\"string\"}]}"
             }
         ),
         @Example(
