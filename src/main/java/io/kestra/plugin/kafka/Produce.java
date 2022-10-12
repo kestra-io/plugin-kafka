@@ -113,14 +113,16 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     )
     @NotNull
     @PluginProperty(dynamic = true)
-    private SerdeType keySerializer;
+    @Builder.Default
+    private SerdeType keySerializer = SerdeType.STRING;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Serializer used for the value"
     )
     @NotNull
     @PluginProperty(dynamic = true)
-    private SerdeType valueSerializer;
+    @Builder.Default
+    private SerdeType valueSerializer = SerdeType.STRING;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Avro Schema if key is `AVRO` type"
@@ -134,9 +136,10 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @PluginProperty(dynamic = true)
     private String valueAvroSchema;
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
+    @SuppressWarnings({"unchecked", "rawtypes", "CaughtExceptionImmediatelyRethrown"})
     @Override
     public Output run(RunContext runContext) throws Exception {
+
         // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
@@ -149,17 +152,30 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         keySerial.configure(serdesProperties, true);
         valSerial.configure(serdesProperties, false);
 
-        KafkaProducer<Object, Object> producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
 
-        Integer count = 1;
+        KafkaProducer<Object, Object> producer = null;
+        try {
+            producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
+            Integer count = 1;
 
-        if (this.from instanceof String || this.from instanceof List) {
-            Flowable<Object> flowable;
-            Flowable<Integer> resultFlowable;
-            if (this.from instanceof String) {
-                URI from = new URI(runContext.render((String) this.from));
-                try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.uriToInputStream(from)))) {
-                    flowable = Flowable.create(FileSerde.reader(inputStream), BackpressureStrategy.BUFFER);
+            // just to test that connection to brokers works
+            producer.partitionsFor(runContext.render(this.topic));
+
+            if (this.from instanceof String || this.from instanceof List) {
+                Flowable<Object> flowable;
+                Flowable<Integer> resultFlowable;
+                if (this.from instanceof String) {
+                    URI from = new URI(runContext.render((String) this.from));
+                    try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.uriToInputStream(from)))) {
+                        flowable = Flowable.create(FileSerde.reader(inputStream), BackpressureStrategy.BUFFER);
+                        resultFlowable = this.buildFlowable(flowable, runContext, producer);
+
+                        count = resultFlowable
+                            .reduce(Integer::sum)
+                            .blockingGet();
+                    }
+                } else {
+                    flowable = Flowable.fromArray(((List<Object>) this.from).toArray());
                     resultFlowable = this.buildFlowable(flowable, runContext, producer);
 
                     count = resultFlowable
@@ -167,25 +183,22 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                         .blockingGet();
                 }
             } else {
-                flowable = Flowable.fromArray(((List<Object>) this.from).toArray());
-                resultFlowable = this.buildFlowable(flowable, runContext, producer);
-
-                count = resultFlowable
-                    .reduce(Integer::sum)
-                    .blockingGet();
+                producer.send(this.producerRecord(runContext, (Map<String, Object>) this.from));
             }
-        } else {
-            producer.send(this.producerRecord(runContext, (Map<String, Object>) this.from));
+
+            // metrics
+            runContext.metric(Counter.of("records", count));
+
+            return Output.builder()
+                .messagesCount(count)
+                .build();
+        } finally {
+            if (producer != null) {
+                producer.flush();
+                producer.close();
+
+            }
         }
-
-        runContext.metric(Counter.of("records", count));
-
-        producer.flush();
-        producer.close();
-
-        return Output.builder()
-            .messagesCount(count)
-            .build();
     }
 
     private GenericRecord buildAvroRecord(RunContext runContext, String dataSchema, Map<String, Object> map) throws Exception {
@@ -225,7 +238,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         }
 
         return new ProducerRecord<>(
-            this.topic,
+            runContext.render(this.topic),
             (Integer) map.get("partition"),
             this.processTimestamp(map.get("timestamp")),
             key,

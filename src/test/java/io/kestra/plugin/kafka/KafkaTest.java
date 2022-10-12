@@ -1,18 +1,19 @@
 package io.kestra.plugin.kafka;
 
 import com.google.common.collect.ImmutableMap;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
-import org.junit.jupiter.params.ParameterizedTest;
-import io.kestra.core.runners.RunContext;
-import io.kestra.core.runners.RunContextFactory;
-
 import jakarta.inject.Inject;
+import org.apache.kafka.common.errors.SerializationException;
+import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -27,11 +28,12 @@ import java.util.*;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @MicronautTest
 public class KafkaTest {
+    public static final String AVRO_SCHEMA_SIMPLE = "{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}";
     @Inject
     private RunContextFactory runContextFactory;
 
@@ -143,20 +145,11 @@ public class KafkaTest {
         Produce task = Produce.builder()
             .properties(Map.of("bootstrap.servers", this.bootstrap))
             .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .valueAvroSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
+            .valueAvroSchema(AVRO_SCHEMA_SIMPLE)
             .keySerializer(SerdeType.STRING)
             .valueSerializer(SerdeType.AVRO)
             .topic(topic)
-            .from(ImmutableMap.builder()
-                .put("key", "string")
-                .put("value", Map.of(
-                    "username", "Kestra",
-                    "tweet", "Kestra is open source",
-                    "timestamp", System.currentTimeMillis() / 1000
-                ))
-                .put("timestamp", Instant.now().toEpochMilli())
-                .build()
-            )
+            .from(record())
             .build();
 
         Produce.Output runOutput = task.run(runContext);
@@ -262,30 +255,11 @@ public class KafkaTest {
         Produce task = Produce.builder()
             .properties(Map.of("bootstrap.servers", this.bootstrap))
             .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .valueAvroSchema("{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}")
+            .valueAvroSchema(AVRO_SCHEMA_SIMPLE)
             .keySerializer(SerdeType.STRING)
             .valueSerializer(SerdeType.AVRO)
             .topic(topic)
-            .from(List.of(
-                ImmutableMap.builder()
-                    .put("key", "string")
-                    .put("value", Map.of(
-                        "username", "Kestra",
-                        "tweet", "Kestra is open source",
-                        "timestamp", System.currentTimeMillis() / 1000
-                    ))
-                    .put("timestamp", Instant.now().toEpochMilli())
-                    .build(),
-                ImmutableMap.builder()
-                    .put("key", "string")
-                    .put("value", Map.of(
-                        "username", "Kestra",
-                        "tweet", "Kestra is open source",
-                        "timestamp", System.currentTimeMillis() / 1000
-                    ))
-                    .put("timestamp", Instant.now().toEpochMilli())
-                    .build()
-            ))
+            .from(List.of(record(), record()))
             .build();
 
         Produce.Output runOutput = task.run(runContext);
@@ -306,5 +280,62 @@ public class KafkaTest {
 
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(2));
+    }
+
+
+    @Test
+    void invalidBrokers() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        TimeoutException e = assertThrows(TimeoutException.class, () -> {
+            Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", "localhost:1234", "max.block.ms", "1000"))
+                .topic(topic)
+                .from(List.of(record(), record()))
+                .build();
+
+            task.run(runContext);
+        });
+        assertThat(e.getMessage(), containsString("not present in metadata"));
+
+
+        e = assertThrows(TimeoutException.class, () -> {
+            Consume task = Consume.builder()
+                .properties(Map.of("bootstrap.servers", "localhost:1234", "default.api.timeout.ms", "1000"))
+                .topic(topic)
+                .build();
+
+            task.run(runContext);
+        });
+        assertThat(e.getMessage(), containsString("Timeout expired"));
+
+        SerializationException ex = assertThrows(SerializationException.class, () -> {
+            Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", "http://localhost:1234"))
+                .valueAvroSchema(AVRO_SCHEMA_SIMPLE)
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .from(record())
+                .build();
+
+            task.run(runContext);
+        });
+
+        assertThat(ex.getCause().getMessage(), containsString("Connection refused"));
+    }
+
+    private Map<String, Object> record() {
+        return ImmutableMap.<String, Object>builder()
+            .put("key", "string")
+            .put("value", Map.of(
+                "username", "Kestra",
+                "tweet", "Kestra is open source",
+                "timestamp", System.currentTimeMillis() / 1000
+            ))
+            .put("timestamp", Instant.now().toEpochMilli())
+            .build();
     }
 }

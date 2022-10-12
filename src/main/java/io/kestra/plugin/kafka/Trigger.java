@@ -59,9 +59,11 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     private String groupId;
 
-    private SerdeType keyDeserializer;
+    @Builder.Default
+    private SerdeType keyDeserializer = SerdeType.STRING;
 
-    private SerdeType valueDeserializer;
+    @Builder.Default
+    private SerdeType valueDeserializer = SerdeType.STRING;
 
     private String since;
 

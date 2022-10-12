@@ -80,9 +80,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     private String groupId;
 
-    private SerdeType keyDeserializer;
+    @Builder.Default
+    private SerdeType keyDeserializer = SerdeType.STRING;
 
-    private SerdeType valueDeserializer;
+    @Builder.Default
+    private SerdeType valueDeserializer = SerdeType.STRING;
 
     private String since;
 
@@ -153,6 +155,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 consumer.commitSync();
             }
 
+            // flush & close
             consumer.close();
             output.flush();
 
