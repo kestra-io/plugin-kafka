@@ -187,7 +187,7 @@ public class KafkaTest {
         return Stream.of(
             Arguments.of(SerdeType.STRING, SerdeType.INTEGER, ImmutableMap.builder()
                 .put("key", "string")
-                .put("value", 1)
+                .put("value", "{{ max(5,10) }}")
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
             Arguments.of(SerdeType.DOUBLE, SerdeType.LONG, ImmutableMap.builder()

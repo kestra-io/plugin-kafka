@@ -225,6 +225,8 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         Object key;
         Object value;
 
+        map = runContext.render(map);
+
         if (this.keySerializer == SerdeType.AVRO) {
             key = buildAvroRecord(runContext, this.keyAvroSchema, (Map<String, Object>) map.get("key"));
         } else {
