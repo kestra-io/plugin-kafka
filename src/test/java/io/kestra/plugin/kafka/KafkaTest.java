@@ -185,8 +185,8 @@ public class KafkaTest {
         map.put("timestamp", Instant.now().toEpochMilli());
 
         return Stream.of(
-            Arguments.of(SerdeType.STRING, SerdeType.INTEGER, ImmutableMap.builder()
-                .put("key", "string")
+            Arguments.of(SerdeType.STRING, SerdeType.STRING, ImmutableMap.builder()
+                .put("key", "{{ \"apple\" ~ \"pear\" ~ \"banana\" }}")
                 .put("value", "{{ max(5,10) }}")
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
