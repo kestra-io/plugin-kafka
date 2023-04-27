@@ -46,7 +46,7 @@ import javax.validation.constraints.NotNull;
 @Plugin(
     examples = {
         @Example(
-            title = "Read a csv, transform it to right format & produce it to Kafka",
+            title = "Read a csv, transform it to the right format, and produce it to Kafka",
             full = true,
             code = {
                 "id: produce",
@@ -102,7 +102,8 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Source of message send",
         description = "Can be an internal storage uri, a map or a list." +
-            "with the following format: key, value, partition, timestamp, headers"
+            "with the following format: key, value, partition, timestamp, headers",
+        anyOf = {String.class, List.class, Map.class}
     )
     @NotNull
     @PluginProperty(dynamic = true)
@@ -294,7 +295,35 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 .collect(Collectors.toList());
         }
 
+        // a message coming from a Consume task will have headers as a list of Map
+        if (headers instanceof List) {
+            return ((List<Map<String, String>>) headers)
+                .stream()
+                .map(map -> map.entrySet().stream().findAny().get()) // there is only one entry
+                .map(o -> new RecordHeader(o.getKey(), convertHeaderValue(o.getValue())))
+                .collect(Collectors.toList());
+        }
+
         throw new IllegalArgumentException("Invalid type of headers with type '" + headers.getClass() + "'");
+    }
+
+    /**
+     * @param value an Array of bytes serialized as a string like "[104, 101, 97, 100, 101, 114, 86, 97, 108, 117, 101]"
+     */
+    private byte[] convertHeaderValue(String value) {
+        if(value == null) {
+            return null;
+        }
+        if(value.length() <= 2) {
+            return new byte[]{};
+        }
+
+        var tokens = value.substring(1, value.length() -1).split(",");
+        var bytes = new byte[tokens.length];
+        for(int i = 0; i < tokens.length; i++) {
+            bytes[i] = Byte.valueOf(tokens[i].trim());
+        }
+        return bytes;
     }
 
     @Builder

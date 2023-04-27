@@ -282,6 +282,54 @@ public class KafkaTest {
         assertThat(consumeOutput.getMessagesCount(), is(2));
     }
 
+    @Test
+    void consumeProduce() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("key", "string");
+        map.put("value", "string");
+        map.put("headers", ImmutableMap.of("headerKey", "headerValue"));
+        map.put("timestamp", Instant.now().toEpochMilli());
+
+        File tempFile = File.createTempFile("consumeProduce", ".txt");
+        OutputStream output = new FileOutputStream(tempFile);
+        FileSerde.write(output, map);
+        URI uri = storageInterface.put(URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+
+        Produce task = Produce.builder()
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.STRING)
+            .topic(topic)
+            .from(uri.toString())
+            .build();
+        Produce.Output runOutput = task.run(runContext);
+        assertThat(runOutput.getMessagesCount(), is(1));
+
+        Consume consume = Consume.builder()
+            .properties(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "max.poll.records", "15"
+            ))
+            .keyDeserializer(SerdeType.STRING)
+            .valueDeserializer(SerdeType.STRING)
+            .pollDuration(Duration.ofSeconds(5))
+            .topic(List.of(topic))
+            .build();
+        Consume.Output consumeOutput = consume.run(runContext);
+        assertThat(consumeOutput.getMessagesCount(), is(1));
+
+        Produce reproduce = Produce.builder()
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.STRING)
+            .topic(topic)
+            .from(consumeOutput.getUri().toString())
+            .build();
+        Produce.Output reproduceRunOutput = reproduce.run(runContext);
+        assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
 
     @Test
     void invalidBrokers() throws Exception {
