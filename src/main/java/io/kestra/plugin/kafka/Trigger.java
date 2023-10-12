@@ -11,7 +11,6 @@ import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
