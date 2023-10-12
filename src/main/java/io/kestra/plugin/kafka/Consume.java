@@ -8,6 +8,7 @@ import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
+import io.kestra.core.utils.Await;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
@@ -89,7 +90,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private String since;
 
     @Builder.Default
-    private Duration pollDuration = Duration.ofSeconds(2);
+    private Duration pollDuration = Duration.ofSeconds(5);
 
     private Integer maxRecords;
 
@@ -203,6 +204,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (this.groupId != null) {
             consumer.subscribe(topics);
+
+            // Wait for for the subscription to happen, this avoids possible no result for the first poll due to the poll timeout
+            Await.until(() -> !consumer.subscription().isEmpty(), this.maxDuration != null ? this.maxDuration : this.pollDuration);
         } else {
             List<TopicPartition> partitions = topics
                 .stream()
