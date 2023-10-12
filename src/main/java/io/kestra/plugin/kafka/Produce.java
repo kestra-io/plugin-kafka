@@ -29,9 +29,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.stream.Collectors;
 import javax.validation.constraints.NotNull;
 
@@ -93,9 +91,9 @@ import javax.validation.constraints.NotNull;
 )
 public class Produce extends AbstractKafkaConnection implements RunnableTask<Produce.Output> {
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "Kafka topic where to send message"
+        title = "Kafka topic where to send message",
+        description = "Could also be passed inside the `from` using the key `topic`"
     )
-    @NotNull
     @PluginProperty(dynamic = true)
     private String topic;
 
@@ -137,6 +135,10 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @PluginProperty(dynamic = true)
     private String valueAvroSchema;
 
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    protected transient List<String> connectionCheckers = new ArrayList<>();
+
     @SuppressWarnings({"unchecked", "rawtypes", "CaughtExceptionImmediatelyRethrown"})
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -158,9 +160,6 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         try {
             producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
             Integer count = 1;
-
-            // just to test that connection to brokers works
-            producer.partitionsFor(runContext.render(this.topic));
 
             if (this.from instanceof String || this.from instanceof List) {
                 Flowable<Object> flowable;
@@ -184,7 +183,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                         .blockingGet();
                 }
             } else {
-                producer.send(this.producerRecord(runContext, (Map<String, Object>) this.from));
+                producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) this.from));
             }
 
             // metrics
@@ -216,15 +215,16 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private Flowable<Integer> buildFlowable(Flowable<Object> flowable, RunContext runContext, KafkaProducer<Object, Object> producer) {
         return flowable
             .map(row -> {
-                producer.send(this.producerRecord(runContext, (Map<String, Object>) row));
+                producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) row));
                 return 1;
             });
     }
 
     @SuppressWarnings("unchecked")
-    private ProducerRecord<Object, Object> producerRecord(RunContext runContext, Map<String, Object> map) throws Exception {
+    private ProducerRecord<Object, Object> producerRecord(RunContext runContext, KafkaProducer<Object, Object> producer, Map<String, Object> map) throws Exception {
         Object key;
         Object value;
+        String topic;
 
         map = runContext.render(map);
 
@@ -240,8 +240,21 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             value = map.get("value");
         }
 
+
+        if (map.containsKey("topic")) {
+            topic = runContext.render((String) map.get("topic"));
+        } else {
+            topic = runContext.render(this.topic);
+        }
+
+        // just to test that connection to brokers works
+        if (!this.connectionCheckers.contains(topic)) {
+            this.connectionCheckers.add(topic);
+            producer.partitionsFor(topic);
+        }
+
         return new ProducerRecord<>(
-            runContext.render(this.topic),
+            runContext.render(topic),
             (Integer) map.get("partition"),
             this.processTimestamp(map.get("timestamp")),
             key,
