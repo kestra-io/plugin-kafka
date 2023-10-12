@@ -8,12 +8,10 @@ import javax.validation.constraints.NotNull;
 public interface KafkaConnectionInterface {
     @Schema(
         title = "Connection properties",
-        description = "`bootstrap.servers` is a minimal required configuration.\n" +
-            "Can be any valid [Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) or " +
-            "[Producer Configs\n](https://kafka.apache.org/documentation/#producerconfigs)\n\n" +
-            "If you want to pass a truststore or a keystore, you must provide a base64 encoded string for : " +
-            "- `ssl.keystore.location` " +
-            "- `ssl.truststore.location` "
+        description = "The `bootstrap.servers` property is a minimal required configuration to connect to a Kafka topic.\n" +
+            "This property can reference any valid [Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) or " +
+            "[Producer Configs\n](https://kafka.apache.org/documentation/#producerconfigs) as key-value pairs.\n\n" +
+            "If you want to pass a truststore or a keystore, you must provide a base64 encoded string for `ssl.keystore.location` and `ssl.truststore.location`."
 
     )
     @PluginProperty(dynamic = true)
@@ -22,8 +20,7 @@ public interface KafkaConnectionInterface {
 
     @Schema(
         title="Serializer configuration",
-        description = "Configuration that will be passed to serializer or deserializer, you typically may need to use ``\n" +
-            "`avro.use.logical.type.converters` is always passed with `true` value."
+        description = "Configuration that will be passed to serializer or deserializer. The `avro.use.logical.type.converters` is always passed when you have any values set to `true`."
     )
     @PluginProperty(dynamic = true)
     Map<String, String> getSerdeProperties();
