@@ -41,7 +41,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages from Kafka topic(s)"
+    title = "Consume messages from one or more Kafka topics"
 )
 @Plugin(
     examples = {
@@ -57,7 +57,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
             }
         ),
         @Example(
-            title = "Connect to a cluster with ssl",
+            title = "Connect to a cluster with SSL",
             code = {
                 "properties:",
                 "  security.protocol: SSL",
@@ -81,9 +81,18 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     private String groupId;
 
+    @io.swagger.v3.oas.annotations.media.Schema(
+        title = "The deserializer used for the key",
+        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
+    )
     @Builder.Default
     private SerdeType keyDeserializer = SerdeType.STRING;
 
+
+    @io.swagger.v3.oas.annotations.media.Schema(
+        title = "The deserializer used for the value",
+        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
+    )
     @Builder.Default
     private SerdeType valueDeserializer = SerdeType.STRING;
 
@@ -251,12 +260,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "Number of message produced"
+            title = "Number of messages consumed from a Kafka topic"
         )
         private final Integer messagesCount;
 
         @Schema(
-            title = "URI of a kestra internal storage file"
+            title = "URI of a kestra internal storage file containing the messages"
         )
         private URI uri;
     }

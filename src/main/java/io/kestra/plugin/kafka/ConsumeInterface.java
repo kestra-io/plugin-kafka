@@ -9,8 +9,8 @@ import javax.validation.constraints.NotNull;
 
 public interface ConsumeInterface {
     @Schema(
-        title = "Kafka topic(s) where to consume message",
-        description = "Can be a string or a List of string to consume from multiple topic"
+        title = "Kafka topic(s) to consume messages from",
+        description = "It can be a string or a list of strings to consume from one or multiple topics."
     )
     @NotNull
     @PluginProperty(dynamic = true)
@@ -18,53 +18,55 @@ public interface ConsumeInterface {
 
     @Schema(
         title = "The consumer group",
-        description = "Using consumer group, we will fetch only records not already consumed"
+        description = "Using a consumer group, we will fetch only records that haven't been consumed yet."
     )
     @PluginProperty(dynamic = true)
     String getGroupId();
 
     @Schema(
-        title = "Deserializer used for the key"
+        title = "The deserializer used for the key",
+        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     @PluginProperty(dynamic = true)
     SerdeType getKeyDeserializer();
 
     @Schema(
-        title = "Deserializer used for the value"
+        title = "The deserializer used for the value",
+        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     @PluginProperty(dynamic = true)
     SerdeType getValueDeserializer();
 
     @Schema(
-        title = "Timestamp of message to start with",
-        description = "By default, we consume all messages from the topics with no consumer group or depending on " +
-            "configuration `auto.offset.reset` with consumer group, but you can provide a arbitrary start time.\n" +
-            "This property is ignore if a consumer group is used.\n" +
-            "Must be a valid iso 8601 date."
+        title = "Timestamp of a message to start consuming messages from.",
+        description = "By default, we consume all messages from the topics with no consumer group or depending on the " +
+            "configuration of the `auto.offset.reset` property. However, you can provide an arbitrary start time.\n" +
+            "This property is ignored if a consumer group is used.\n" +
+            "It must be a valid ISO 8601 date."
     )
     @PluginProperty(dynamic = true)
     String getSince();
 
     @Schema(
-        title = "Duration waiting for record to be polled",
-        description = "If no records are available, the max wait to wait for a new records. "
+        title = "How often to poll for a record",
+        description = "If no records are available, the maximum wait duration to wait for new records. "
     )
     @NotNull
     @PluginProperty(dynamic = true)
     Duration getPollDuration();
 
     @Schema(
-        title = "The max number of rows to fetch before stopping",
-        description = "It's not an hard limit and is evaluated every second"
+        title = "The maximum number of records to fetch before stopping the consumption process.",
+        description = "It's a soft limit evaluated every second."
     )
     @PluginProperty(dynamic = false)
     Integer getMaxRecords();
 
     @Schema(
-        title = "The max duration waiting for new rows",
-        description = "It's not an hard limit and is evaluated every second"
+        title = "The maximum duration to wait for new records before stopping the consumption process.",
+        description = "It's a soft limit evaluated every second."
     )
     @PluginProperty(dynamic = false)
     Duration getMaxDuration();

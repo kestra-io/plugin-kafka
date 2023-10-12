@@ -1,8 +1,8 @@
 package io.kestra.plugin.kafka.serdes;
 
 @io.swagger.v3.oas.annotations.media.Schema(
-    title = "Serializer / Deserializer use for the value",
-    description = "List are not handled."
+    title = "Serializer / Deserializer to use for the value",
+    description = "Lists are not supported."
 )
 public enum SerdeType {
     STRING,
