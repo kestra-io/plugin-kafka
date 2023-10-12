@@ -205,8 +205,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         if (this.groupId != null) {
             consumer.subscribe(topics);
 
-            // Wait for 5mn for the subscription to happen, this avoids possible no result for the first poll due to the poll timeout
-            Await.until(() -> !consumer.subscription().isEmpty(), Duration.ofMinutes(5));
+            // Wait for for the subscription to happen, this avoids possible no result for the first poll due to the poll timeout
+            Await.until(() -> !consumer.subscription().isEmpty(), this.maxDuration != null ? this.maxDuration : this.pollDuration);
         } else {
             List<TopicPartition> partitions = topics
                 .stream()
