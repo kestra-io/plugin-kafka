@@ -75,7 +75,7 @@ public class KafkaTest {
             );
         }
 
-        URI uri = storageInterface.put(URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+        URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = Produce.builder()
             .properties(Map.of("bootstrap.servers", this.bootstrap))
@@ -119,7 +119,7 @@ public class KafkaTest {
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(50));
 
-        BufferedReader inputStream = new BufferedReader(new InputStreamReader(storageInterface.get(consumeOutput.getUri())));
+        BufferedReader inputStream = new BufferedReader(new InputStreamReader(storageInterface.get(null, consumeOutput.getUri())));
         List<Map<String, Object>> result = new ArrayList<>();
         FileSerde.reader(inputStream, r -> result.add((Map<String, Object>) r));
 
@@ -295,7 +295,7 @@ public class KafkaTest {
         File tempFile = File.createTempFile("consumeProduce", ".txt");
         OutputStream output = new FileOutputStream(tempFile);
         FileSerde.write(output, map);
-        URI uri = storageInterface.put(URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+        URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = Produce.builder()
             .properties(Map.of("bootstrap.servers", this.bootstrap))
