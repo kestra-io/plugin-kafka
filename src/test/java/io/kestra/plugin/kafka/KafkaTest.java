@@ -34,6 +34,37 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @MicronautTest
 public class KafkaTest {
     public static final String AVRO_SCHEMA_SIMPLE = "{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[{\"name\":\"username\",\"type\":\"string\",\"doc\":\"Name of the user account on Twitter.com\"},{\"name\":\"tweet\",\"type\":\"string\",\"doc\":\"The content of the user's Twitter message\"},{\"name\":\"timestamp\",\"type\":\"long\",\"doc\":\"Unix epoch time in milliseconds\"}],\"doc:\":\"A basic schema for storing Twitter messages\"}";
+    public static final String AVRO_SCHEMA_COMPLEX = """
+        {
+            "type": "record",
+            "name": "twitter_schema",
+            "namespace": "io.kestra.examples",
+            "fields": [
+              {
+                "name": "username",
+                "type": "string"
+              },
+              {
+                "name": "tweet",
+                "type": "string"
+              },
+              {
+                "name": "stat",
+                "type": {
+                  "type": "record",
+                  "name": "stat",
+                  "fields": [
+                    {
+                      "name": "followers_count",
+                      "type": "long"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        """;
+
     @Inject
     private RunContextFactory runContextFactory;
 
@@ -373,6 +404,29 @@ public class KafkaTest {
         });
 
         assertThat(ex.getCause().getMessage(), containsString("Connection refused"));
+    }
+
+    @Test
+    void produceComplexAvro() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("username", "loic");
+        map.put("tweet", "Something clever");
+        map.put("stat", Map.of("followers_count", 10L));
+        
+        Produce reproduce = Produce.builder()
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .serdeProperties(Map.of("schema.registry.url", this.registry))
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.AVRO)
+            .topic(topic)
+            .valueAvroSchema(AVRO_SCHEMA_COMPLEX)
+            .from(Map.of("value", map))
+            .build();
+        Produce.Output reproduceRunOutput = reproduce.run(runContext);
+        assertThat(reproduceRunOutput.getMessagesCount(), is(1));
     }
 
     private Map<String, Object> record() {

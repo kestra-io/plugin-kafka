@@ -204,9 +204,19 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private GenericRecord buildAvroRecord(RunContext runContext, String dataSchema, Map<String, Object> map) throws Exception {
         Schema.Parser parser = new Schema.Parser();
         Schema schema = parser.parse(runContext.render(dataSchema));
+        return buildAvroRecord(schema, map);
+    }
+
+    private GenericRecord buildAvroRecord(Schema schema, Map<String, Object> map) {
         GenericRecord avroRecord = new GenericData.Record(schema);
         for (String k : map.keySet()) {
-            avroRecord.put(k, map.get(k));
+            Object value = map.get(k);
+            Schema fieldSchema = schema.getField(k).schema();
+            if (fieldSchema.getType().equals(Schema.Type.RECORD)) {
+                avroRecord.put(k, buildAvroRecord(fieldSchema, (Map<String, Object>) value));
+            } else {
+                avroRecord.put(k, value);
+            }
         }
         return avroRecord;
     }
