@@ -114,6 +114,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         Properties properties = createProperties(this.properties, runContext);
         if (this.groupId != null) {
             properties.put(ConsumerConfig.GROUP_ID_CONFIG, runContext.render(groupId));
+
+            if (!properties.contains(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)) {
+                // by default, we disable auto-commit
+                properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+            }
         }
 
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
