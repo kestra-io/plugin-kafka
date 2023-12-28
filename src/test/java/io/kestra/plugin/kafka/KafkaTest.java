@@ -370,6 +370,7 @@ public class KafkaTest {
         TimeoutException e = assertThrows(TimeoutException.class, () -> {
             Produce task = Produce.builder()
                 .properties(Map.of("bootstrap.servers", "localhost:1234", "max.block.ms", "1000"))
+                .transactional(false) // if transactional the exception would be 'java.lang.IllegalStateException: Cannot attempt operation `commitTransaction` because the previous call to `initTransactions` timed out and must be retried'
                 .topic(topic)
                 .from(List.of(record(), record()))
                 .build();

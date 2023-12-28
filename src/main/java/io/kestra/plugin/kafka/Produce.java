@@ -7,6 +7,7 @@ import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
+import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.reactivex.BackpressureStrategy;
 import io.reactivex.Flowable;
@@ -16,6 +17,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -138,11 +140,18 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @PluginProperty(dynamic = true)
     private String valueAvroSchema;
 
+    @io.swagger.v3.oas.annotations.media.Schema(
+        title = "Whether the producer should be transactional"
+    )
+    @Builder.Default
+    @PluginProperty
+    private boolean transactional = true;
+
     @Builder.Default
     @Getter(AccessLevel.NONE)
     protected transient List<String> connectionCheckers = new ArrayList<>();
 
-    @SuppressWarnings({"unchecked", "rawtypes", "CaughtExceptionImmediatelyRethrown"})
+    @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
     public Output run(RunContext runContext) throws Exception {
 
@@ -150,6 +159,10 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
         Properties properties = createProperties(this.properties, runContext);
+        if (transactional) {
+            properties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, IdUtils.create());
+        }
+
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
 
         Serializer keySerial = getTypedSerializer(this.keySerializer);
@@ -163,6 +176,11 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         try {
             producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
             Integer count = 1;
+
+            if (transactional) {
+                producer.initTransactions();
+                producer.beginTransaction();
+            }
 
             if (this.from instanceof String || this.from instanceof List) {
                 Flowable<Object> flowable;
@@ -197,9 +215,11 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 .build();
         } finally {
             if (producer != null) {
+                if (transactional) {
+                    producer.commitTransaction();
+                }
                 producer.flush();
                 producer.close();
-
             }
         }
     }
