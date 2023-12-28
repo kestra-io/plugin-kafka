@@ -121,6 +121,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             }
         }
 
+        if (!properties.contains(ConsumerConfig.ISOLATION_LEVEL_CONFIG)) {
+            // by default, we only read committed offsets in case of transactions
+            properties.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+        }
+
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
         serdesProperties.put(KafkaAvroSerializerConfig.AVRO_USE_LOGICAL_TYPE_CONVERTERS_CONFIG, true);
 
