@@ -9,8 +9,6 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
-import io.reactivex.BackpressureStrategy;
-import io.reactivex.Flowable;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.avro.Schema;
@@ -34,6 +32,10 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 import jakarta.validation.constraints.NotNull;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+
+import static io.kestra.core.utils.Rethrow.throwFunction;
 
 @SuperBuilder
 @ToString
@@ -183,25 +185,25 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             }
 
             if (this.from instanceof String || this.from instanceof List) {
-                Flowable<Object> flowable;
-                Flowable<Integer> resultFlowable;
+                Flux<Object> flowable;
+                Flux<Integer> resultFlowable;
                 if (this.from instanceof String) {
                     URI from = new URI(runContext.render((String) this.from));
                     try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.uriToInputStream(from)))) {
-                        flowable = Flowable.create(FileSerde.reader(inputStream), BackpressureStrategy.BUFFER);
+                        flowable = Flux.create(FileSerde.reader(inputStream), FluxSink.OverflowStrategy.BUFFER);
                         resultFlowable = this.buildFlowable(flowable, runContext, producer);
 
                         count = resultFlowable
                             .reduce(Integer::sum)
-                            .blockingGet();
+                            .block();
                     }
                 } else {
-                    flowable = Flowable.fromArray(((List<Object>) this.from).toArray());
+                    flowable = Flux.fromArray(((List<Object>) this.from).toArray());
                     resultFlowable = this.buildFlowable(flowable, runContext, producer);
 
                     count = resultFlowable
                         .reduce(Integer::sum)
-                        .blockingGet();
+                        .block();
                 }
             } else {
                 producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) this.from));
@@ -245,12 +247,12 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     }
 
     @SuppressWarnings("unchecked")
-    private Flowable<Integer> buildFlowable(Flowable<Object> flowable, RunContext runContext, KafkaProducer<Object, Object> producer) {
+    private Flux<Integer> buildFlowable(Flux<Object> flowable, RunContext runContext, KafkaProducer<Object, Object> producer) throws Exception {
         return flowable
-            .map(row -> {
+            .map(throwFunction(row -> {
                 producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) row));
                 return 1;
-            });
+            }));
     }
 
     @SuppressWarnings("unchecked")
