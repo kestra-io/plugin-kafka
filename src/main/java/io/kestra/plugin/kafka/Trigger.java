@@ -29,7 +29,7 @@ import java.util.Optional;
 @NoArgsConstructor
 @Schema(
     title = """
-    React to and consume messages from one or more Kafka topics. Note that you don't need an extra task to consume the message from the event trigger. The trigger will automatically consume messages and you can retrieve their content in your flow using the `{{ trigger.uri }}` variable."""
+    React to and consume messages from one or more Kafka topics. Note that you don't need an extra task to consume the message from the event trigger. The trigger will automatically consume messages and you can retrieve their content in your flow using the `"{{ trigger.uri }}"` variable."""
 )
 @Plugin(
     examples = {

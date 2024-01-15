@@ -9,7 +9,7 @@ import javax.validation.constraints.NotNull;
 
 public interface ConsumeInterface {
     @Schema(
-        title = "Kafka topic(s) to consume messages from",
+        title = "Kafka topic(s) to consume messages from.",
         description = "It can be a string or a list of strings to consume from one or multiple topics."
     )
     @NotNull
@@ -17,14 +17,14 @@ public interface ConsumeInterface {
     Object getTopic();
 
     @Schema(
-        title = "The consumer group",
+        title = "Kafka consumer group ID.",
         description = "Using a consumer group, we will fetch only records that haven't been consumed yet."
     )
     @PluginProperty(dynamic = true)
     String getGroupId();
 
     @Schema(
-        title = "The deserializer used for the key",
+        title = "The deserializer used for the key.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
@@ -32,7 +32,7 @@ public interface ConsumeInterface {
     SerdeType getKeyDeserializer();
 
     @Schema(
-        title = "The deserializer used for the value",
+        title = "The deserializer used for the value.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
@@ -50,7 +50,7 @@ public interface ConsumeInterface {
     String getSince();
 
     @Schema(
-        title = "How often to poll for a record",
+        title = "How often to poll for a record.",
         description = "If no records are available, the maximum wait duration to wait for new records. "
     )
     @NotNull
