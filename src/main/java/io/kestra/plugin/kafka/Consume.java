@@ -41,7 +41,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages from one or more Kafka topics"
+    title = "Consume messages from one or more Kafka topics."
 )
 @Plugin(
     examples = {
@@ -57,11 +57,11 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
             }
         ),
         @Example(
-            title = "Connect to a cluster with SSL",
+            title = "Connect to a Kafka cluster with SSL.",
             code = {
                 "properties:",
                 "  security.protocol: SSL",
-                "  bootstrap.servers: server.aivencloud.com:12835",
+                "  bootstrap.servers: localhost:19092",
                 "  ssl.key.password: my-ssl-password",
                 "  ssl.keystore.type: PKCS12",
                 "  ssl.keystore.location: my-base64-encoded-keystore",
@@ -82,7 +82,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private String groupId;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The deserializer used for the key",
+        title = "The deserializer used for the key.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @Builder.Default
@@ -90,7 +90,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The deserializer used for the value",
+        title = "The deserializer used for the value.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @Builder.Default
@@ -270,12 +270,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "Number of messages consumed from a Kafka topic"
+            title = "Number of messages consumed from a Kafka topic."
         )
         private final Integer messagesCount;
 
         @Schema(
-            title = "URI of a kestra internal storage file containing the messages"
+            title = "URI of a file in Kestra's internal storage containing the messages."
         )
         private URI uri;
     }

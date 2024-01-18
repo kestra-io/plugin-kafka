@@ -41,12 +41,12 @@ import javax.validation.constraints.NotNull;
 @Getter
 @NoArgsConstructor
 @io.swagger.v3.oas.annotations.media.Schema(
-    title = "Send a message to a Kafka topic"
+    title = "Send a message to a Kafka topic."
 )
 @Plugin(
     examples = {
         @Example(
-            title = "Read a CSV file, transform it and send it to Kafka",
+            title = "Read a CSV file, transform it and send it to Kafka.",
             full = true,
             code = {
                 "id: send_message_to_kafka",
@@ -54,7 +54,7 @@ import javax.validation.constraints.NotNull;
                 "inputs:",
                 "  - type: FILE",
                 "    name: file",
-                "    description: a CSV file with columns id, username, tweet, and timestamp",
+                "    description: A CSV file with columns: id, username, tweet, and timestamp.",
                 "",
                 "tasks:",
                 "  - id: csv_to_ion",
@@ -81,9 +81,9 @@ import javax.validation.constraints.NotNull;
                 "    from: \"{{ outputs.fileTransform.uri }}\"",
                 "    keySerializer: STRING",
                 "    properties:",
-                "      bootstrap.servers: local:9092",
+                "      bootstrap.servers: localhost:9092",
                 "    serdeProperties:",
-                "      schema.registry.url: http://local:8085",
+                "      schema.registry.url: http://localhost:8085",
                 "    topic: test_kestra",
                 "    valueAvroSchema: |",
                 "      {\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"io.kestra.examples\",\"fields\":[{\"name\":\"username\",\"type\":\"string\"},{\"name\":\"tweet\",\"type\":\"string\"}]}",
@@ -94,15 +94,15 @@ import javax.validation.constraints.NotNull;
 )
 public class Produce extends AbstractKafkaConnection implements RunnableTask<Produce.Output> {
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "Kafka topic to which the message should be sent",
-        description = "Could also be passed inside the `from` property using the key `topic`"
+        title = "Kafka topic to which the message should be sent.",
+        description = "Could also be passed inside the `from` property using the key `topic`."
     )
     @PluginProperty(dynamic = true)
     private String topic;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The content of the message to be sent to Kafka",
-        description = "Can be an internal storage uri, a map (i.e. a list of key-value pairs) or a list of maps. " +
+        title = "The content of the message to be sent to Kafka.",
+        description = "Can be a Kestra internal storage URI, a map (i.e. a list of key-value pairs) or a list of maps. " +
             "The following keys are supported: `key`, `value`, `partition`, `timestamp`, and `headers`.",
         anyOf = {String.class, List.class, Map.class}
     )
@@ -111,7 +111,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private Object from;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The serializer used for the key",
+        title = "The serializer used for the key.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
@@ -120,7 +120,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private SerdeType keySerializer = SerdeType.STRING;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The serializer used for the value",
+        title = "The serializer used for the value.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
@@ -129,19 +129,19 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private SerdeType valueSerializer = SerdeType.STRING;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "Avro Schema if the key is set to `AVRO` type"
+        title = "Avro Schema if the key is set to `AVRO` type."
     )
     @PluginProperty(dynamic = true)
     private String keyAvroSchema;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "Avro Schema if the value is set to `AVRO` type"
+        title = "Avro Schema if the value is set to `AVRO` type."
     )
     @PluginProperty(dynamic = true)
     private String valueAvroSchema;
 
     @io.swagger.v3.oas.annotations.media.Schema(
-        title = "Whether the producer should be transactional"
+        title = "Whether the producer should be transactional."
     )
     @Builder.Default
     @PluginProperty
@@ -376,7 +376,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @io.swagger.v3.oas.annotations.media.Schema(
-            title = "Number of messages sent to a Kafka topic"
+            title = "Number of messages sent to a Kafka topic."
         )
         private final Integer messagesCount;
     }
