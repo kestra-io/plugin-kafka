@@ -53,7 +53,7 @@ import javax.validation.constraints.NotNull;
                 "namespace: dev",
                 "inputs:",
                 "  - type: FILE",
-                "    name: file",
+                "    id: file",
                 "    description: A CSV file with columns: id, username, tweet, and timestamp.",
                 "",
                 "tasks:",
