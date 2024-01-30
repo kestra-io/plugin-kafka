@@ -5,7 +5,7 @@ import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Duration;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 
 public interface ConsumeInterface {
     @Schema(

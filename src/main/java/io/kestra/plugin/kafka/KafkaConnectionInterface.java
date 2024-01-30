@@ -4,7 +4,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.Map;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotNull;
 public interface KafkaConnectionInterface {
     @Schema(
         title = "Kafka connection properties.",
