@@ -16,7 +16,6 @@ public abstract class GenericData {
         GENERIC_DATA.addLogicalTypeConversion(new TimeConversions.TimestampMillisConversion());
         GENERIC_DATA.addLogicalTypeConversion(new TimeConversions.LocalTimestampMicrosConversion());
         GENERIC_DATA.addLogicalTypeConversion(new TimeConversions.LocalTimestampMillisConversion());
-        GENERIC_DATA.addLogicalTypeConversion(new TimeConversions.LocalTimestampMicrosConversion());
         GENERIC_DATA.addLogicalTypeConversion(new AdditionalConversions.ZonedDateTimeMillisConversion());
         GENERIC_DATA.addLogicalTypeConversion(new AdditionalConversions.ZonedDateTimeMicrosConversion());
         GENERIC_DATA.addLogicalTypeConversion(new AdditionalConversions.OffsetDateTimeMillisConversion());
