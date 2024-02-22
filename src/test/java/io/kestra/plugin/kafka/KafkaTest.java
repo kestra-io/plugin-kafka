@@ -443,6 +443,39 @@ public class KafkaTest {
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
     }
 
+    @Test
+    void shouldConsumeGivenTopicPartition() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+        File tempFile = createRecordFile();
+        URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+
+        Produce task = createProduceTask(topic, uri);
+        Produce.Output runOutput = task.run(runContext);
+        assertThat(runOutput.getMessagesCount(), is(1));
+
+        Consume consume = Consume.builder()
+            .properties(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "max.poll.records", "15",
+                "auto.offset.reset", "earliest",
+                "metadata.max.age.ms", "100"
+            ))
+            .keyDeserializer(SerdeType.STRING)
+            .valueDeserializer(SerdeType.STRING)
+            .pollDuration(Duration.ofSeconds(5))
+            .topic(topic)
+            .partitions(List.of(0))
+            .groupId(IdUtils.create())
+            .build();
+        Consume.Output consumeOutput = consume.run(runContext);
+        assertThat(consumeOutput.getMessagesCount(), is(1));
+
+        Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
+        Produce.Output reproduceRunOutput = reproduce.run(runContext);
+        assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
+
     private static File createRecordFile() throws IOException {
         HashMap<String, Object> map = new HashMap<>();
         map.put("key", "string");

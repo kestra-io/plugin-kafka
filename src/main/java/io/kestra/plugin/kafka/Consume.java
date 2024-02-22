@@ -33,7 +33,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.chrono.ChronoZonedDateTime;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -88,6 +93,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Object topic;
 
     private String topicPattern;
+
+    private List<Integer> partitions;
 
     private String groupId;
 
@@ -224,8 +231,13 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     ConsumerSubscription topicSubscription(final RunContext runContext) throws IllegalVariableEvaluationException {
         validateConfiguration();
 
+        if (this.topic != null && (partitions != null && !partitions.isEmpty())) {
+            List<TopicPartition> topicPartitions = getTopicPartitions(runContext);
+            return TopicPartitionsSubscription.forTopicPartitions(topicPartitions, evaluateSince(runContext));
+        }
+
         if (this.topic != null && groupId == null) {
-            return new TopicPartitionsSubscription(evaluateTopics(runContext), evaluateSince(runContext));
+            return TopicPartitionsSubscription.forTopics(evaluateTopics(runContext), evaluateSince(runContext));
         }
 
         if (this.topic != null) {
@@ -234,12 +246,19 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (this.topicPattern != null) {
             try {
-                return new PatternTopicSubscription(groupId, Pattern.compile(this.topicPattern));
+                return new TopicPatternSubscription(groupId, Pattern.compile(this.topicPattern));
             } catch (PatternSyntaxException e) {
                 throw new IllegalArgumentException("Invalid regex for `topicPattern`: " + this.topicPattern);
             }
         }
         throw new IllegalArgumentException("Failed to create KafkaConsumer subscription");
+    }
+
+    private List<TopicPartition> getTopicPartitions(RunContext runContext) throws IllegalVariableEvaluationException {
+        List<String> topics = evaluateTopics(runContext);
+        return topics.stream()
+            .flatMap(topic1 -> partitions.stream().map(partition -> new TopicPartition(topic1, partition)))
+            .toList();
     }
 
     /**
@@ -335,10 +354,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     }
 
     /**
-     * A pattern subscription.
+     * A topic pattern subscription.
      */
     @VisibleForTesting
-    record PatternTopicSubscription(String group, Pattern pattern) implements ConsumerSubscription {
+    record TopicPatternSubscription(String group, Pattern pattern) implements ConsumerSubscription {
         @Override
         public void subscribe(final Consumer<Object, Object> consumer,
                               final ConsumeInterface consumeInterface) {
@@ -373,19 +392,45 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
      * A topic-partitions subscription.
      */
     @VisibleForTesting
-    record TopicPartitionsSubscription(List<String> topics,
-                                               Long fromTimestamp) implements ConsumerSubscription {
+    static final class TopicPartitionsSubscription implements ConsumerSubscription {
+
+        private List<TopicPartition> topicPartitions;
+        private List<String> topics;
+        private final Long fromTimestamp;
+
+        public static TopicPartitionsSubscription forTopicPartitions(List<TopicPartition> topicPartitions, Long fromTimestamp) {
+            return new TopicPartitionsSubscription(
+                topicPartitions,
+                topicPartitions.stream().map(TopicPartition::topic).toList(),
+                fromTimestamp
+            );
+        }
+
+        public static TopicPartitionsSubscription forTopics(List<String> topics, Long fromTimestamp) {
+            return new TopicPartitionsSubscription(null, topics, fromTimestamp);
+        }
+
+        TopicPartitionsSubscription(final List<TopicPartition> topicPartitions,
+                                    final List<String> topics,
+                                    Long fromTimestamp) {
+            this.topicPartitions = topicPartitions;
+            this.topics = topics;
+            this.fromTimestamp = fromTimestamp;
+        }
 
         @Override
         public void subscribe(final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
-            List<TopicPartition> topicPartitions = allPartitionsForTopics(consumer, topics);
-            consumer.assign(topicPartitions);
+            if (this.topicPartitions == null) {
+                this.topicPartitions = allPartitionsForTopics(consumer, topics);
+            }
+
+            consumer.assign(this.topicPartitions);
             if (this.fromTimestamp == null) {
-                consumer.seekToBeginning(topicPartitions);
+                consumer.seekToBeginning(this.topicPartitions);
                 return;
             }
 
-            Map<TopicPartition, Long> topicPartitionsTimestamp = topicPartitions
+            Map<TopicPartition, Long> topicPartitionsTimestamp = this.topicPartitions
                 .stream()
                 .collect(Collectors.toMap(Function.identity(), tp -> fromTimestamp));
 
@@ -394,6 +439,18 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .forEach((tp, offsetAndTimestamp) -> {
                     consumer.seek(tp, offsetAndTimestamp.timestamp());
                 });
+        }
+
+        public List<String> topics() {
+            return topics;
+        }
+
+        public Long fromTimestamp() {
+            return fromTimestamp;
+        }
+
+        public List<TopicPartition> topicPartitions() {
+            return topicPartitions;
         }
 
         private List<TopicPartition> allPartitionsForTopics(final Consumer<?, ?> consumer, final List<String> topics) {
