@@ -12,6 +12,7 @@ import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -317,24 +318,10 @@ public class KafkaTest {
     void consumeProduce() throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
         String topic = "tu_" + IdUtils.create();
-        HashMap<String, Object> map = new HashMap<>();
-        map.put("key", "string");
-        map.put("value", "string");
-        map.put("headers", ImmutableMap.of("headerKey", "headerValue"));
-        map.put("timestamp", Instant.now().toEpochMilli());
-
-        File tempFile = File.createTempFile("consumeProduce", ".txt");
-        OutputStream output = new FileOutputStream(tempFile);
-        FileSerde.write(output, map);
+        File tempFile = createRecordFile();
         URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
-        Produce task = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.STRING)
-            .topic(topic)
-            .from(uri.toString())
-            .build();
+        Produce task = createProduceTask(topic, uri);
         Produce.Output runOutput = task.run(runContext);
         assertThat(runOutput.getMessagesCount(), is(1));
 
@@ -351,13 +338,7 @@ public class KafkaTest {
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(1));
 
-        Produce reproduce = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.STRING)
-            .topic(topic)
-            .from(consumeOutput.getUri().toString())
-            .build();
+        Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
     }
@@ -428,6 +409,61 @@ public class KafkaTest {
             .build();
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void shouldConsumeGivenTopicPattern() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+        File tempFile = createRecordFile();
+        URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+
+        Produce task = createProduceTask(topic, uri);
+        Produce.Output runOutput = task.run(runContext);
+        assertThat(runOutput.getMessagesCount(), is(1));
+
+        Consume consume = Consume.builder()
+            .properties(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "max.poll.records", "15",
+                "auto.offset.reset", "earliest",
+                "metadata.max.age.ms", "100"
+            ))
+            .keyDeserializer(SerdeType.STRING)
+            .valueDeserializer(SerdeType.STRING)
+            .pollDuration(Duration.ofSeconds(5))
+            .topicPattern(topic.substring(0, 6) + ".*")
+            .groupId(IdUtils.create())
+            .build();
+        Consume.Output consumeOutput = consume.run(runContext);
+        assertThat(consumeOutput.getMessagesCount(), is(1));
+
+        Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
+        Produce.Output reproduceRunOutput = reproduce.run(runContext);
+        assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
+
+    private static File createRecordFile() throws IOException {
+        HashMap<String, Object> map = new HashMap<>();
+        map.put("key", "string");
+        map.put("value", "string");
+        map.put("headers", ImmutableMap.of("headerKey", "headerValue"));
+        map.put("timestamp", Instant.now().toEpochMilli());
+
+        File tempFile = File.createTempFile("consumeProduce", ".txt");
+        OutputStream output = new FileOutputStream(tempFile);
+        FileSerde.write(output, map);
+        return tempFile;
+    }
+
+    private Produce createProduceTask(final String topic, final URI uri) {
+        return Produce.builder()
+            .properties(Map.of("bootstrap.servers", this.bootstrap))
+            .keySerializer(SerdeType.STRING)
+            .valueSerializer(SerdeType.STRING)
+            .topic(topic)
+            .from(uri.toString())
+            .build();
     }
 
     private Map<String, Object> record() {
