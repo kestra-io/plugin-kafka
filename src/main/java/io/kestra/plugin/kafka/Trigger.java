@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -57,6 +58,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     private Object topic;
 
+    private List<Integer> partitions;
+
     private String topicPattern;
 
     private String groupId;
@@ -87,6 +90,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .properties(this.properties)
             .serdeProperties(this.serdeProperties)
             .topic(this.topic)
+            .partitions(this.partitions)
             .groupId(this.groupId)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)

@@ -9,6 +9,7 @@ import jakarta.inject.Inject;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.PartitionInfo;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -94,6 +95,28 @@ class ConsumeTest {
     }
 
     @Test
+    void shouldGetTopicPartitionSubscriptionGivenPartition() throws IllegalVariableEvaluationException {
+        // Given
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        Instant now = Instant.now();
+        Consume task = Consume
+            .builder()
+            .topic("topic")
+            .partitions(List.of(0))
+            .since(now.toString())
+            .build();
+
+        // When
+        Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
+
+        // Then
+        Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
+        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription)subscription).topics());
+        Assertions.assertEquals(List.of(new TopicPartition("topic", 0)), ((Consume.TopicPartitionsSubscription)subscription).topicPartitions());
+        Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription)subscription).fromTimestamp());
+    }
+
+    @Test
     void shouldGetTopicListSubscriptionGivenTopicAndGroupId() throws IllegalVariableEvaluationException {
         // Given
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
@@ -130,7 +153,7 @@ class ConsumeTest {
 
         // Then
         Assertions.assertDoesNotThrow(() -> subscription.subscribe(consumer, task));
-        Assertions.assertTrue(subscription instanceof Consume.PatternTopicSubscription);
-        Assertions.assertEquals(".*", ((Consume.PatternTopicSubscription)subscription).pattern().pattern());
+        Assertions.assertTrue(subscription instanceof Consume.TopicPatternSubscription);
+        Assertions.assertEquals(".*", ((Consume.TopicPatternSubscription)subscription).pattern().pattern());
     }
 }

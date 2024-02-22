@@ -5,6 +5,8 @@ import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.Duration;
+import java.util.List;
+
 import jakarta.validation.constraints.NotNull;
 
 public interface ConsumeInterface {
@@ -21,6 +23,13 @@ public interface ConsumeInterface {
     )
     @PluginProperty(dynamic = true)
     String getTopicPattern();
+
+    @Schema(
+        title = "Topic partitions to consume messages from.",
+        description = "Manually assign a list of partitions to the consumer."
+    )
+    @PluginProperty(dynamic = false)
+    List<Integer> getPartitions();
 
     @Schema(
         title = "Kafka consumer group ID.",
