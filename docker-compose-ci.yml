@@ -1,38 +1,36 @@
 version: "3.6"
 
 services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.0.0
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_ADMIN_ENABLE_SERVER: 'false'
-
   kafka:
-    image: confluentinc/cp-kafka:7.0.0
+    image: confluentinc/cp-kafka:7.5.0 # AK 3.5.x
     environment:
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_NODE_ID: 101
+      # random cluster ID used for formatting LOG_DIR for KRaft
+      CLUSTER_ID: 'xtzWWN4bTjitpL3kfd9s5g'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '101@kafka:29093'
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_JMX_PORT: 9991
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://kafka:29093'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_HOST://kafka:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://kafka:9093
-      KAFKA_CONFLUENT_SUPPORT_METRICS_ENABLE: 'false'
-      KAFKA_JMX_PORT: '9091'
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
-      KAFKA_AUTHORIZER_CLASS_NAME: 'kafka.security.authorizer.AclAuthorizer'
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
-    links:
-      - zookeeper
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: 'false'
     ports:
       - 9092:9092
+    restart: on-failure
 
   schema-registry:
-    image: confluentinc/cp-schema-registry:7.0.0
+    image: confluentinc/cp-schema-registry:7.5.0
     depends_on:
       - kafka
     environment:
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'PLAINTEXT://kafka:9093'
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'PLAINTEXT://kafka:29092'
       SCHEMA_REGISTRY_HOST_NAME: 'schema-registry'
       SCHEMA_REGISTRY_LISTENERS: 'http://0.0.0.0:8085'
       SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: 'INFO'
