@@ -90,6 +90,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .properties(this.properties)
             .serdeProperties(this.serdeProperties)
             .topic(this.topic)
+            .topicPattern(this.topicPattern)
             .partitions(this.partitions)
             .groupId(this.groupId)
             .keyDeserializer(this.keyDeserializer)
