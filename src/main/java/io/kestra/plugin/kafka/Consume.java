@@ -1,5 +1,6 @@
 package io.kestra.plugin.kafka;
 
+import com.google.common.annotations.VisibleForTesting;
 import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
@@ -9,17 +10,20 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.Await;
+import io.kestra.core.utils.Rethrow;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -28,8 +32,12 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
+import java.time.chrono.ChronoZonedDateTime;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -79,6 +87,8 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output>, ConsumeInterface {
     private Object topic;
 
+    private String topicPattern;
+
     private String groupId;
 
     @io.swagger.v3.oas.annotations.media.Schema(
@@ -104,6 +114,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Integer maxRecords;
 
     private Duration maxDuration;
+
+    @Getter(AccessLevel.PACKAGE)
+    private ConsumerSubscription subscription;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
@@ -136,11 +149,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         valSerial.configure(serdesProperties, false);
 
         File tempFile = runContext.tempFile(".ion").toFile();
-        try(
+        try (
             BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile));
             KafkaConsumer<Object, Object> consumer = new KafkaConsumer<Object, Object>(properties, keySerial, valSerial);
         ) {
-            this.affectTopics(runContext, consumer);
+            this.subscription = topicSubscription(runContext);
+            this.subscription.subscribe(consumer, this);
 
             Map<String, Integer> count = new HashMap<>();
             AtomicInteger total = new AtomicInteger();
@@ -207,60 +221,82 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         return false;
     }
 
+    ConsumerSubscription topicSubscription(final RunContext runContext) throws IllegalVariableEvaluationException {
+        validateConfiguration();
+
+        if (this.topic != null && groupId == null) {
+            return new TopicPartitionsSubscription(evaluateTopics(runContext), evaluateSince(runContext));
+        }
+
+        if (this.topic != null) {
+            return new TopicListSubscription(groupId, evaluateTopics(runContext));
+        }
+
+        if (this.topicPattern != null) {
+            try {
+                return new PatternTopicSubscription(groupId, Pattern.compile(this.topicPattern));
+            } catch (PatternSyntaxException e) {
+                throw new IllegalArgumentException("Invalid regex for `topicPattern`: " + this.topicPattern);
+            }
+        }
+        throw new IllegalArgumentException("Failed to create KafkaConsumer subscription");
+    }
+
+    /**
+     * @return the configured `topic` list.
+     */
     @SuppressWarnings("unchecked")
-    Collection<String> topics(RunContext runContext) throws IllegalVariableEvaluationException {
+    private List<String> evaluateTopics(final RunContext runContext) throws IllegalVariableEvaluationException {
+        List<String> topics;
         if (this.topic instanceof String) {
-            return List.of(runContext.render((String) this.topic));
+            topics = List.of(runContext.render((String) this.topic));
         } else if (this.topic instanceof List) {
-            return runContext.render((List<String>) this.topic);
+            topics = runContext.render((List<String>) this.topic);
         } else {
             throw new IllegalArgumentException("Invalid topics with type '" + this.topic.getClass().getName() + "'");
         }
+        return topics;
     }
 
-    private void affectTopics(RunContext runContext, KafkaConsumer<Object, Object> consumer) throws IllegalVariableEvaluationException {
-        Collection<String> topics = this.topics(runContext);
+    /**
+     * @return the configured `since` property.
+     */
+    @Nullable
+    private Long evaluateSince(final RunContext runContext) throws IllegalVariableEvaluationException {
+        return Optional.ofNullable(this.since)
+            .map(Rethrow.throwFunction(runContext::render))
+            .map(ZonedDateTime::parse)
+            .map(ChronoZonedDateTime::toInstant)
+            .map(Instant::toEpochMilli)
+            .orElse(null);
+    }
 
-        if (this.groupId != null) {
-            consumer.subscribe(topics);
+    /**
+     * Validates the task's configurations.
+     */
+    @VisibleForTesting
+    void validateConfiguration() {
+        if (this.topic == null && this.topicPattern == null) {
+            throw new IllegalArgumentException(
+                "Invalid Configuration: You must configure one of the following two settings: `topic` or `topicPattern`."
+            );
+        }
 
-            // Wait for for the subscription to happen, this avoids possible no result for the first poll due to the poll timeout
-            Await.until(() -> !consumer.subscription().isEmpty(), this.maxDuration != null ? this.maxDuration : this.pollDuration);
-        } else {
-            List<TopicPartition> partitions = topics
-                .stream()
-                .flatMap(s -> consumer.partitionsFor(s).stream())
-                .map(info -> new TopicPartition(info.topic(), info.partition()))
-                .collect(Collectors.toList());
+        if (this.topic != null && this.topicPattern != null) {
+            throw new IllegalArgumentException(
+                "Invalid Configuration: Both `topic` and `topicPattern` was configured. You must configure only one of the following two settings: `topic` or `topicPattern`."
+            );
+        }
 
-            consumer.assign(partitions);
-
-            if (this.since == null) {
-                consumer.seekToBeginning(partitions);
-            } else {
-                Long timestamp = ZonedDateTime
-                    .parse(runContext.render(this.since))
-                    .toInstant()
-                    .toEpochMilli();
-
-                consumer
-                    .offsetsForTimes(
-                        partitions.stream()
-                            .map(topicPartition -> new AbstractMap.SimpleEntry<>(
-                                topicPartition,
-                                timestamp
-                            ))
-                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
-                    )
-                    .forEach((topicPartition, offsetAndTimestamp) -> {
-                        consumer.seek(topicPartition, offsetAndTimestamp.timestamp());
-                    });
-            }
+        if (this.topicPattern != null && this.groupId == null) {
+            throw new IllegalArgumentException(
+                "Invalid Configuration: `groupId` can not be null when `topicPattern` is configured."
+            );
         }
     }
 
     private static List<Pair<String, String>> processHeaders(Headers headers) {
-         return StreamSupport
+        return StreamSupport
             .stream(headers.spliterator(), false)
             .map(header -> Pair.of(header.key(), Arrays.toString(header.value())))
             .collect(Collectors.toList());
@@ -278,5 +314,99 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             title = "URI of a file in Kestra's internal storage containing the messages."
         )
         private URI uri;
+    }
+
+    /**
+     * Interface to wrap a {@link Consumer} subscription.
+     */
+    @VisibleForTesting
+    interface ConsumerSubscription {
+
+        void subscribe(Consumer<Object, Object> consumer, ConsumeInterface consumeInterface);
+
+        default void waitForSubscription(final Consumer<Object, Object> consumer,
+                                         final ConsumeInterface consumeInterface) {
+            var timeout = consumeInterface.getMaxDuration() != null ?
+                consumeInterface.getMaxDuration() :
+                consumeInterface.getPollDuration();
+            // Wait for the subscription to happen, this avoids possible no result for the first poll due to the poll timeout
+            Await.until(() -> !consumer.subscription().isEmpty(), timeout);
+        }
+    }
+
+    /**
+     * A pattern subscription.
+     */
+    @VisibleForTesting
+    record PatternTopicSubscription(String group, Pattern pattern) implements ConsumerSubscription {
+        @Override
+        public void subscribe(final Consumer<Object, Object> consumer,
+                              final ConsumeInterface consumeInterface) {
+            consumer.subscribe(pattern);
+        }
+
+        @Override
+        public String toString() {
+            return "[pattern=" + pattern + ", group=" + group + "]";
+        }
+    }
+
+    /**
+     * A topic list subscription.
+     */
+    @VisibleForTesting
+    record TopicListSubscription(String group, List<String> topics) implements ConsumerSubscription {
+
+        @Override
+        public void subscribe(final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
+            consumer.subscribe(topics);
+            waitForSubscription(consumer, consumeInterface);
+        }
+
+        @Override
+        public String toString() {
+            return "[topics=" + topics + ", group=" + group + "]";
+        }
+    }
+
+    /**
+     * A topic-partitions subscription.
+     */
+    @VisibleForTesting
+    record TopicPartitionsSubscription(List<String> topics,
+                                               Long fromTimestamp) implements ConsumerSubscription {
+
+        @Override
+        public void subscribe(final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
+            List<TopicPartition> topicPartitions = allPartitionsForTopics(consumer, topics);
+            consumer.assign(topicPartitions);
+            if (this.fromTimestamp == null) {
+                consumer.seekToBeginning(topicPartitions);
+                return;
+            }
+
+            Map<TopicPartition, Long> topicPartitionsTimestamp = topicPartitions
+                .stream()
+                .collect(Collectors.toMap(Function.identity(), tp -> fromTimestamp));
+
+            consumer
+                .offsetsForTimes(topicPartitionsTimestamp)
+                .forEach((tp, offsetAndTimestamp) -> {
+                    consumer.seek(tp, offsetAndTimestamp.timestamp());
+                });
+        }
+
+        private List<TopicPartition> allPartitionsForTopics(final Consumer<?, ?> consumer, final List<String> topics) {
+            return topics
+                .stream()
+                .flatMap(s -> consumer.partitionsFor(s).stream())
+                .map(info -> new TopicPartition(info.topic(), info.partition()))
+                .toList();
+        }
+
+        @Override
+        public String toString() {
+            return "[topics=" + topics + "]";
+        }
     }
 }

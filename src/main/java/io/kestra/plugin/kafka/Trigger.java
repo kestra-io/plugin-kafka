@@ -57,6 +57,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     private Object topic;
 
+    private String topicPattern;
+
     private String groupId;
 
     @Builder.Default
@@ -96,7 +98,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
         Consume.Output run = task.run(runContext);
 
         if (logger.isDebugEnabled()) {
-            logger.debug("Found '{}' messages from '{}'", run.getMessagesCount(), task.topics(runContext));
+            logger.debug("Found '{}' messages from consumer subscription: '{}'", run.getMessagesCount(), task.getSubscription());
         }
 
         if (run.getMessagesCount() == 0) {

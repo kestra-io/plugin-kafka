@@ -12,9 +12,15 @@ public interface ConsumeInterface {
         title = "Kafka topic(s) to consume messages from.",
         description = "It can be a string or a list of strings to consume from one or multiple topics."
     )
-    @NotNull
     @PluginProperty(dynamic = true)
     Object getTopic();
+
+    @Schema(
+            title = "Kafka topic pattern to consume messages from.",
+            description = "Consumer will subscribe to all topics matching the specified pattern to get dynamically assigned partitions."
+    )
+    @PluginProperty(dynamic = true)
+    String getTopicPattern();
 
     @Schema(
         title = "Kafka consumer group ID.",
