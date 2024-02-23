@@ -13,13 +13,19 @@ import io.kestra.core.utils.Await;
 import io.kestra.core.utils.Rethrow;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.*;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
@@ -36,6 +42,7 @@ import java.time.chrono.ChronoZonedDateTime;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -90,6 +97,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
     }
 )
 public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output>, ConsumeInterface {
+
     private Object topic;
 
     private String topicPattern;
@@ -131,34 +139,40 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
-        Properties properties = createProperties(this.properties, runContext);
+        final Properties consumerProps = createProperties(this.properties, runContext);
+
         if (this.groupId != null) {
-            properties.put(ConsumerConfig.GROUP_ID_CONFIG, runContext.render(groupId));
-
-            if (!properties.contains(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)) {
-                // by default, we disable auto-commit
-                properties.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
-            }
+            consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, runContext.render(groupId));
+        } else if (consumerProps.contains(ConsumerConfig.GROUP_ID_CONFIG)) {
+            // groupId can be passed from properties
+            this.groupId = consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
         }
 
-        if (!properties.contains(ConsumerConfig.ISOLATION_LEVEL_CONFIG)) {
+        if (!consumerProps.contains(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)) {
+            // by default, we disable auto-commit
+            consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
+        }
+
+        if (!consumerProps.contains(ConsumerConfig.ISOLATION_LEVEL_CONFIG)) {
             // by default, we only read committed offsets in case of transactions
-            properties.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+            consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, IsolationLevel.READ_COMMITTED.toString().toLowerCase(Locale.ROOT));
         }
 
-        Properties serdesProperties = createProperties(this.serdeProperties, runContext);
+        final Properties serdesProperties = createProperties(this.serdeProperties, runContext);
+
+        // by default, enable Avro LogicalType
         serdesProperties.put(KafkaAvroSerializerConfig.AVRO_USE_LOGICAL_TYPE_CONVERTERS_CONFIG, true);
 
-        Deserializer keySerial = getTypedDeserializer(this.keyDeserializer);
-        Deserializer valSerial = getTypedDeserializer(this.valueDeserializer);
+        final Deserializer keyDeserializer = getTypedDeserializer(this.keyDeserializer);
+        final Deserializer valDeserializer = getTypedDeserializer(this.valueDeserializer);
 
-        keySerial.configure(serdesProperties, true);
-        valSerial.configure(serdesProperties, false);
+        keyDeserializer.configure(serdesProperties, true);
+        valDeserializer.configure(serdesProperties, false);
 
         File tempFile = runContext.tempFile(".ion").toFile();
         try (
             BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile));
-            KafkaConsumer<Object, Object> consumer = new KafkaConsumer<Object, Object>(properties, keySerial, valSerial);
+            KafkaConsumer<Object, Object> consumer = new KafkaConsumer<Object, Object>(consumerProps, keyDeserializer, valDeserializer);
         ) {
             this.subscription = topicSubscription(runContext);
             this.subscription.subscribe(consumer, this);
@@ -210,7 +224,6 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
     }
 
-
     @SuppressWarnings("RedundantIfStatement")
     private boolean ended(Boolean empty, AtomicInteger count, ZonedDateTime start) {
         if (empty) {
@@ -233,11 +246,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (this.topic != null && (partitions != null && !partitions.isEmpty())) {
             List<TopicPartition> topicPartitions = getTopicPartitions(runContext);
-            return TopicPartitionsSubscription.forTopicPartitions(topicPartitions, evaluateSince(runContext));
+            return TopicPartitionsSubscription.forTopicPartitions(groupId, topicPartitions, evaluateSince(runContext));
         }
 
         if (this.topic != null && groupId == null) {
-            return TopicPartitionsSubscription.forTopics(evaluateTopics(runContext), evaluateSince(runContext));
+            return TopicPartitionsSubscription.forTopics(null, evaluateTopics(runContext), evaluateSince(runContext));
         }
 
         if (this.topic != null) {
@@ -357,7 +370,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
      * A topic pattern subscription.
      */
     @VisibleForTesting
-    record TopicPatternSubscription(String group, Pattern pattern) implements ConsumerSubscription {
+    record TopicPatternSubscription(String groupId, Pattern pattern) implements ConsumerSubscription {
         @Override
         public void subscribe(final Consumer<Object, Object> consumer,
                               final ConsumeInterface consumeInterface) {
@@ -366,7 +379,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         @Override
         public String toString() {
-            return "[pattern=" + pattern + ", group=" + group + "]";
+            return "[Subscription pattern=" + pattern + ", groupId=" + groupId + "]";
         }
     }
 
@@ -374,7 +387,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
      * A topic list subscription.
      */
     @VisibleForTesting
-    record TopicListSubscription(String group, List<String> topics) implements ConsumerSubscription {
+    record TopicListSubscription(String groupId, List<String> topics) implements ConsumerSubscription {
 
         @Override
         public void subscribe(final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
@@ -384,7 +397,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         @Override
         public String toString() {
-            return "[topics=" + topics + ", group=" + group + "]";
+            return "[Subscription topics=" + topics + ", groupId=" + groupId + "]";
         }
     }
 
@@ -394,25 +407,33 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @VisibleForTesting
     static final class TopicPartitionsSubscription implements ConsumerSubscription {
 
-        private List<TopicPartition> topicPartitions;
-        private List<String> topics;
+        private final String groupId;
+        private final List<String> topics;
         private final Long fromTimestamp;
+        private List<TopicPartition> topicPartitions;
 
-        public static TopicPartitionsSubscription forTopicPartitions(List<TopicPartition> topicPartitions, Long fromTimestamp) {
+        public static TopicPartitionsSubscription forTopicPartitions(final String groupId,
+                                                                     final List<TopicPartition> topicPartitions,
+                                                                     final Long fromTimestamp) {
             return new TopicPartitionsSubscription(
+                groupId,
                 topicPartitions,
                 topicPartitions.stream().map(TopicPartition::topic).toList(),
                 fromTimestamp
             );
         }
 
-        public static TopicPartitionsSubscription forTopics(List<String> topics, Long fromTimestamp) {
-            return new TopicPartitionsSubscription(null, topics, fromTimestamp);
+        public static TopicPartitionsSubscription forTopics(final String groupId,
+                                                            final List<String> topics,
+                                                            final Long fromTimestamp) {
+            return new TopicPartitionsSubscription(groupId, null, topics, fromTimestamp);
         }
 
-        TopicPartitionsSubscription(final List<TopicPartition> topicPartitions,
+        TopicPartitionsSubscription(final String groupId,
+                                    final List<TopicPartition> topicPartitions,
                                     final List<String> topics,
                                     Long fromTimestamp) {
+            this.groupId = groupId;
             this.topicPartitions = topicPartitions;
             this.topics = topics;
             this.fromTimestamp = fromTimestamp;
@@ -441,15 +462,18 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 });
         }
 
-        public List<String> topics() {
+        @VisibleForTesting
+        List<String> topics() {
             return topics;
         }
 
-        public Long fromTimestamp() {
+        @VisibleForTesting
+        Long fromTimestamp() {
             return fromTimestamp;
         }
 
-        public List<TopicPartition> topicPartitions() {
+        @VisibleForTesting
+        List<TopicPartition> topicPartitions() {
             return topicPartitions;
         }
 
@@ -463,7 +487,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         @Override
         public String toString() {
-            return "[topics=" + topics + "]";
+            return "[Subscription topics=" + topics + ", groupId=" + groupId + "]";
         }
     }
 }

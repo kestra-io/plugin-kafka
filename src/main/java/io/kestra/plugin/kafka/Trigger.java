@@ -103,7 +103,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
         Consume.Output run = task.run(runContext);
 
         if (logger.isDebugEnabled()) {
-            logger.debug("Found '{}' messages from consumer subscription: '{}'", run.getMessagesCount(), task.getSubscription());
+            logger.debug("Found '{}' messages for: '{}'", run.getMessagesCount(), task.getSubscription());
         }
 
         if (run.getMessagesCount() == 0) {
