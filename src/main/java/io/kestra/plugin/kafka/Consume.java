@@ -219,7 +219,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
             return Output.builder()
                 .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
-                .uri(runContext.putTempFile(tempFile))
+                .uri(runContext.storage().putFile(tempFile))
                 .build();
         }
     }
