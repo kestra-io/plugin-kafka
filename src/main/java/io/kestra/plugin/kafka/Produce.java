@@ -189,7 +189,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 Flux<Integer> resultFlowable;
                 if (this.from instanceof String) {
                     URI from = new URI(runContext.render((String) this.from));
-                    try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.uriToInputStream(from)))) {
+                    try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.storage().getFile(from)))) {
                         flowable = Flux.create(FileSerde.reader(inputStream), FluxSink.OverflowStrategy.BUFFER);
                         resultFlowable = this.buildFlowable(flowable, runContext, producer);
 
