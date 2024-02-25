@@ -143,7 +143,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (this.groupId != null) {
             consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, runContext.render(groupId));
-        } else if (consumerProps.contains(ConsumerConfig.GROUP_ID_CONFIG)) {
+        } else if (consumerProps.containsKey(ConsumerConfig.GROUP_ID_CONFIG)) {
             // groupId can be passed from properties
             this.groupId = consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
         }
@@ -270,7 +270,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private List<TopicPartition> getTopicPartitions(RunContext runContext) throws IllegalVariableEvaluationException {
         List<String> topics = evaluateTopics(runContext);
         return topics.stream()
-            .flatMap(topic1 -> partitions.stream().map(partition -> new TopicPartition(topic1, partition)))
+            .flatMap(topic -> partitions.stream().map(partition -> new TopicPartition(topic, partition)))
             .toList();
     }
 
@@ -322,7 +322,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (this.topicPattern != null && this.groupId == null) {
             throw new IllegalArgumentException(
-                "Invalid Configuration: `groupId` can not be null when `topicPattern` is configured."
+                "Invalid Configuration: `groupId` cannot be null when `topicPattern` is configured."
             );
         }
     }
