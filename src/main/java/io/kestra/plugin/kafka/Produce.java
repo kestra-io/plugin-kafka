@@ -9,7 +9,12 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
-import lombok.*;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -29,7 +34,10 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
 import java.util.stream.Collectors;
 import jakarta.validation.constraints.NotNull;
 import reactor.core.publisher.Flux;
@@ -348,30 +356,11 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             return ((List<Map<String, String>>) headers)
                 .stream()
                 .map(map -> map.entrySet().stream().findAny().get()) // there is only one entry
-                .map(o -> new RecordHeader(o.getKey(), convertHeaderValue(o.getValue())))
+                .map(o -> new RecordHeader(o.getKey(), o.getValue().getBytes(StandardCharsets.UTF_8)))
                 .collect(Collectors.toList());
         }
 
         throw new IllegalArgumentException("Invalid type of headers with type '" + headers.getClass() + "'");
-    }
-
-    /**
-     * @param value an Array of bytes serialized as a string like "[104, 101, 97, 100, 101, 114, 86, 97, 108, 117, 101]"
-     */
-    private byte[] convertHeaderValue(String value) {
-        if(value == null) {
-            return null;
-        }
-        if(value.length() <= 2) {
-            return new byte[]{};
-        }
-
-        var tokens = value.substring(1, value.length() -1).split(",");
-        var bytes = new byte[tokens.length];
-        for(int i = 0; i < tokens.length; i++) {
-            bytes[i] = Byte.valueOf(tokens[i].trim());
-        }
-        return bytes;
     }
 
     @Builder
