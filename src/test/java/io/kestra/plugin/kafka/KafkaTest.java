@@ -13,10 +13,13 @@ import jakarta.inject.Inject;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
 import java.io.*;
 import java.net.URI;
@@ -26,6 +29,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -337,7 +341,7 @@ public class KafkaTest {
             .build();
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(1));
-
+        assertOutputFile(runContext, consumeOutput);
         Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
@@ -437,7 +441,7 @@ public class KafkaTest {
             .build();
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(1));
-
+        assertOutputFile(runContext, consumeOutput);
         Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
@@ -471,9 +475,22 @@ public class KafkaTest {
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(1));
 
+        assertOutputFile(runContext, consumeOutput);
         Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
+
+    private static void assertOutputFile(RunContext runContext, Consume.Output consumeOutput) throws IOException {
+        InputStream is = runContext.storage().getFile(consumeOutput.getUri());
+        Consumer<FluxSink<Map>> reader = FileSerde.reader(new BufferedReader(new InputStreamReader(is)), Map.class);
+        Map<String, Object> result = Flux.create(reader).blockLast();
+        Assertions.assertNotNull(result);
+        Assertions.assertTrue(result.containsKey("key"));
+        Assertions.assertTrue(result.containsKey("value"));
+        Assertions.assertTrue(result.containsKey("timestamp"));
+        Assertions.assertTrue(result.containsKey("partition"));
+        Assertions.assertTrue(result.containsKey("offset"));
     }
 
     private static File createRecordFile() throws IOException {

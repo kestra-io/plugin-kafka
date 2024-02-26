@@ -197,6 +197,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                     map.put("topic", record.topic());
                     map.put("partition", record.partition());
                     map.put("timestamp", Instant.ofEpochMilli(record.timestamp()));
+                    map.put("offset", record.offset());
 
                     FileSerde.write(output, map);
 
