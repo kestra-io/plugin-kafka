@@ -6,17 +6,22 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import jakarta.inject.Inject;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
+
+import static org.hamcrest.MatcherAssert.assertThat;
 
 @MicronautTest
 class ConsumeTest {
@@ -73,7 +78,7 @@ class ConsumeTest {
 
         // Then
         Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
-        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription)subscription).topics());
+        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
     }
 
     @Test
@@ -92,8 +97,8 @@ class ConsumeTest {
 
         // Then
         Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
-        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription)subscription).topics());
-        Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription)subscription).fromTimestamp());
+        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
+        Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription) subscription).fromTimestamp());
     }
 
     @Test
@@ -113,9 +118,9 @@ class ConsumeTest {
 
         // Then
         Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
-        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription)subscription).topics());
-        Assertions.assertEquals(List.of(new TopicPartition("topic", 0)), ((Consume.TopicPartitionsSubscription)subscription).topicPartitions());
-        Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription)subscription).fromTimestamp());
+        Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
+        Assertions.assertEquals(List.of(new TopicPartition("topic", 0)), ((Consume.TopicPartitionsSubscription) subscription).topicPartitions());
+        Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription) subscription).fromTimestamp());
     }
 
     @Test
@@ -134,7 +139,7 @@ class ConsumeTest {
         // Then
         Assertions.assertDoesNotThrow(() -> subscription.subscribe(new MockConsumer<>(OffsetResetStrategy.EARLIEST), task));
         Assertions.assertTrue(subscription instanceof Consume.TopicListSubscription);
-        Assertions.assertEquals(List.of("topic"), ((Consume.TopicListSubscription)subscription).topics());
+        Assertions.assertEquals(List.of("topic"), ((Consume.TopicListSubscription) subscription).topics());
     }
 
     @Test
@@ -156,6 +161,23 @@ class ConsumeTest {
         // Then
         Assertions.assertDoesNotThrow(() -> subscription.subscribe(consumer, task));
         Assertions.assertTrue(subscription instanceof Consume.TopicPatternSubscription);
-        Assertions.assertEquals(".*", ((Consume.TopicPatternSubscription)subscription).pattern().pattern());
+        Assertions.assertEquals(".*", ((Consume.TopicPatternSubscription) subscription).pattern().pattern());
+    }
+
+    @Test
+    void shouldGetRecordHeadersAsPairs() {
+        // Given
+        List<Pair<String, String>> inputs = List.of(
+            Pair.of("test-header-key-1", "test-header-value-1"),
+            Pair.of("test-header-key-2", "test-header-value-2")
+        );
+
+        Headers headers = new RecordHeaders();
+        inputs.forEach(pair -> headers.add(pair.getKey(), pair.getValue().getBytes(StandardCharsets.UTF_8)));
+
+        // When
+        List<Pair<String, String>> outputs = Consume.processHeaders(headers);
+        // Then
+        assertThat(inputs, Matchers.containsInAnyOrder(outputs.toArray()));
     }
 }

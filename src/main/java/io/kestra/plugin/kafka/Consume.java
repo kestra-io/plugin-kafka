@@ -35,6 +35,7 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -328,10 +329,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
     }
 
-    private static List<Pair<String, String>> processHeaders(Headers headers) {
+    @VisibleForTesting
+    static List<Pair<String, String>> processHeaders(final Headers headers) {
         return StreamSupport
             .stream(headers.spliterator(), false)
-            .map(header -> Pair.of(header.key(), Arrays.toString(header.value())))
+            .map(header -> Pair.of(header.key(), new String(header.value(), StandardCharsets.UTF_8)))
             .collect(Collectors.toList());
     }
 
