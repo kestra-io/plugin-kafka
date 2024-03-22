@@ -104,7 +104,7 @@ class TriggerTest {
             worker.run();
             scheduler.run();
 
-            repositoryLoader.load(Objects.requireNonNull(TriggerTest.class.getClassLoader().getResource("flows")));
+            repositoryLoader.load(Objects.requireNonNull(TriggerTest.class.getClassLoader().getResource("flows/trigger.yaml")));
 
             task.run(TestsUtils.mockRunContext(runContextFactory, task, ImmutableMap.of()));
 

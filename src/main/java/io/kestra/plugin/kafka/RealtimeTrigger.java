@@ -1,11 +1,10 @@
 package io.kestra.plugin.kafka;
 
+import com.google.common.annotations.Beta;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.executions.ExecutionTrigger;
-import io.kestra.core.models.flows.State;
 import io.kestra.core.models.triggers.*;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.SerdeType;
@@ -13,13 +12,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.slf4j.Logger;
+import org.reactivestreams.Publisher;
+import reactor.core.publisher.Flux;
 
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @SuperBuilder
 @ToString
@@ -27,8 +26,7 @@ import java.util.Optional;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "React to and consume messages from one or more Kafka topics.",
-    description = "Note that you don't need an extra task to consume the message from the event trigger. The trigger will automatically consume messages and you can retrieve their content in your flow using the `{{ trigger.uri }}` variable."
+    title = "React to and consume messages from one or more Kafka topics creating one executions for each message."
 )
 @Plugin(
     examples = {
@@ -45,10 +43,8 @@ import java.util.Optional;
         )
     }
 )
-public class Trigger extends AbstractTrigger implements PollingTriggerInterface, TriggerOutput<Consume.Output>, KafkaConnectionInterface, ConsumeInterface {
-    @Builder.Default
-    private final Duration interval = Duration.ofSeconds(60);
-
+@Beta
+public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, ConsumeInterface {
     private Map<String, String> properties;
 
     @Builder.Default
@@ -79,9 +75,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     private Duration maxDuration;
 
     @Override
-    public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
+    public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) {
         RunContext runContext = conditionContext.getRunContext();
-        Logger logger = runContext.logger();
 
         Consume task = Consume.builder()
             .id(this.id)
@@ -99,18 +94,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .maxRecords(this.maxRecords)
             .maxDuration(this.maxDuration)
             .build();
-        Consume.Output run = task.run(runContext);
 
-        if (logger.isDebugEnabled()) {
-            logger.debug("Found '{}' messages for: '{}'", run.getMessagesCount(), task.getSubscription());
-        }
-
-        if (run.getMessagesCount() == 0) {
-            return Optional.empty();
-        }
-
-        Execution execution = TriggerService.generateExecution(this, conditionContext, context, run);
-
-        return Optional.of(execution);
+        return Flux.from(task.stream(runContext))
+            .map((record) -> TriggerService.generateRealtimeExecution(this, context, task.recordToMessage(record)));
     }
 }
