@@ -1,12 +1,11 @@
-id: trigger
+id: realtime
 namespace: io.kestra.tests
 
 triggers:
   - id: watch
-    type: io.kestra.plugin.kafka.Trigger
-    interval: PT10S
-    topic: tu_trigger
-    groupId: trigger-group
+    type: io.kestra.plugin.kafka.RealtimeTrigger
+    topic: tu_stream
+    groupId: stream-group
     properties:
       bootstrap.servers: localhost:9092
       auto.offset.reset: "earliest"

@@ -8,6 +8,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.GenericRecordToMapDeserializer;
 import io.kestra.plugin.kafka.serdes.KafkaAvroSerializer;
 import io.kestra.plugin.kafka.serdes.SerdeType;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.common.config.SslConfigs;
@@ -27,6 +28,7 @@ import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 @Getter
 @NoArgsConstructor
 public abstract class AbstractKafkaConnection extends Task implements KafkaConnectionInterface {
+    @NotNull
     protected Map<String, String> properties;
 
     @Builder.Default

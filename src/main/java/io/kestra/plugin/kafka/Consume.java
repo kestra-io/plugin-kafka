@@ -13,23 +13,18 @@ import io.kestra.core.utils.Await;
 import io.kestra.core.utils.Rethrow;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AccessLevel;
-import lombok.Builder;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.kafka.clients.consumer.Consumer;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.jetbrains.annotations.Nullable;
+import org.reactivestreams.Publisher;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -40,13 +35,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.chrono.ChronoZonedDateTime;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -98,7 +87,6 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
     }
 )
 public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output>, ConsumeInterface {
-
     private Object topic;
 
     private String topicPattern;
@@ -107,18 +95,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     private String groupId;
 
-    @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The deserializer used for the key.",
-        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
-    )
     @Builder.Default
     private SerdeType keyDeserializer = SerdeType.STRING;
 
-
-    @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The deserializer used for the value.",
-        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
-    )
     @Builder.Default
     private SerdeType valueDeserializer = SerdeType.STRING;
 
@@ -135,8 +114,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private ConsumerSubscription subscription;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    @Override
-    public Output run(RunContext runContext) throws Exception {
+    private KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
         // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
@@ -170,10 +148,15 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         keyDeserializer.configure(serdesProperties, true);
         valDeserializer.configure(serdesProperties, false);
 
+        return new KafkaConsumer<Object, Object>(consumerProps, keyDeserializer, valDeserializer);
+    }
+
+    @Override
+    public Output run(RunContext runContext) throws Exception {
         File tempFile = runContext.tempFile(".ion").toFile();
         try (
             BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile));
-            KafkaConsumer<Object, Object> consumer = new KafkaConsumer<Object, Object>(consumerProps, keyDeserializer, valDeserializer);
+            KafkaConsumer<Object, Object> consumer = this.consumer(runContext)
         ) {
             this.subscription = topicSubscription(runContext);
             this.subscription.subscribe(consumer, this);
@@ -189,18 +172,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 empty = records.isEmpty();
 
                 records.forEach(throwConsumer(record -> {
-                    // using HashMap for null values
-                    Map<Object, Object> map = new HashMap<>();
-
-                    map.put("key", record.key());
-                    map.put("value", record.value());
-                    map.put("headers", processHeaders(record.headers()));
-                    map.put("topic", record.topic());
-                    map.put("partition", record.partition());
-                    map.put("timestamp", Instant.ofEpochMilli(record.timestamp()));
-                    map.put("offset", record.offset());
-
-                    FileSerde.write(output, map);
+                    FileSerde.write(output, this.recordToMessage(record));
 
                     total.getAndIncrement();
                     count.compute(record.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
@@ -224,6 +196,41 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .uri(runContext.storage().putFile(tempFile))
                 .build();
         }
+    }
+
+    public Publisher<ConsumerRecord<Object, Object>> stream(RunContext runContext)  {
+            return Flux.create(fluxSink -> {
+                try {
+                    try (KafkaConsumer<Object, Object> consumer = this.consumer(runContext)) {
+                        this.subscription = topicSubscription(runContext);
+                        this.subscription.subscribe(consumer, this);
+
+                        while (true) {
+                            consumer
+                                .poll(this.pollDuration)
+                                .forEach(fluxSink::next);
+
+                            consumer.commitSync();
+                        }
+                    }
+                } catch (Throwable e) {
+                    fluxSink.error(e);
+                } finally {
+                    fluxSink.complete();
+                }
+            }, FluxSink.OverflowStrategy.BUFFER);
+    }
+
+    public Message recordToMessage(ConsumerRecord<Object, Object> record) {
+        return Message.builder()
+            .key(record.key())
+            .value(record.value())
+            .headers(processHeaders(record.headers()))
+            .topic(record.topic())
+            .partition(record.partition())
+            .timestamp(Instant.ofEpochMilli(record.timestamp()))
+            .offset(record.offset())
+            .build();
     }
 
     @SuppressWarnings("RedundantIfStatement")
