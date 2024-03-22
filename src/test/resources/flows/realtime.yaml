@@ -1,0 +1,21 @@
+id: realtime
+namespace: io.kestra.tests
+
+triggers:
+  - id: watch
+    type: io.kestra.plugin.kafka.RealtimeTrigger
+    topic: tu_stream
+    groupId: stream-group
+    properties:
+      bootstrap.servers: localhost:9092
+      auto.offset.reset: "earliest"
+    serdeProperties:
+      schema.registry.url: http://localhost:8085
+    keyDeserializer: STRING
+    valueDeserializer: STRING
+
+
+tasks:
+  - id: end
+    type: io.kestra.core.tasks.debugs.Return
+    format: "{{task.id}} > {{taskrun.startDate}}"
