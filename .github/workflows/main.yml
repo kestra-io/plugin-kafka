@@ -41,7 +41,7 @@ jobs:
           java-version: 21
 
       - name: Validate Gradle wrapper
-        uses: gradle/wrapper-validation-action@v2
+        uses: gradle/wrapper-validation-action@v3
 
       - name: Build the docker-compose stack
         run: docker-compose -f docker-compose-ci.yml up -d
