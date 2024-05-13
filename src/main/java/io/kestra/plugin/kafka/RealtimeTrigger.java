@@ -1,6 +1,5 @@
 package io.kestra.plugin.kafka;
 
-import com.google.common.annotations.Beta;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.conditions.ConditionContext;
@@ -41,9 +40,9 @@ import java.util.Map;
                 "valueDeserializer: AVRO",
             }
         )
-    }
+    },
+    beta = true
 )
-@Beta
 public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, ConsumeInterface {
     private Map<String, String> properties;
 
