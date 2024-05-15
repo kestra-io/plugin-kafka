@@ -24,7 +24,6 @@ import org.apache.kafka.common.serialization.Deserializer;
 import org.jetbrains.annotations.Nullable;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -213,12 +212,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                             consumer.commitSync();
                         }
                     }
-                } catch (Throwable e) {
+                } catch (Exception e) {
                     fluxSink.error(e);
                 } finally {
                     fluxSink.complete();
                 }
-            }, FluxSink.OverflowStrategy.BUFFER);
+            });
     }
 
     public Message recordToMessage(ConsumerRecord<Object, Object> record) {
