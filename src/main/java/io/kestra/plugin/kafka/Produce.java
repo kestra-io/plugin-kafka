@@ -68,7 +68,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                 "",
                 "tasks:",
                 "  - id: csv_to_ion",
-                "    type: io.kestra.plugin.serdes.csv.CsvReader",
+                "    type: io.kestra.plugin.serdes.csv.CsvToIon",
                 "    from: \"{{ inputs.file }}\"",
                 "  - id: ion_to_avro_schema",
                 "    type: io.kestra.plugin.scripts.nashorn.FileTransform",
