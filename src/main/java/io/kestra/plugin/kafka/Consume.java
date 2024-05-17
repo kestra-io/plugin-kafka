@@ -22,8 +22,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.jetbrains.annotations.Nullable;
-import org.reactivestreams.Publisher;
-import reactor.core.publisher.Flux;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -113,7 +111,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private ConsumerSubscription subscription;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
+    public KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
         // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
@@ -197,29 +195,6 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
     }
 
-    public Publisher<ConsumerRecord<Object, Object>> stream(RunContext runContext)  {
-            return Flux.create(fluxSink -> {
-                try {
-                    try (KafkaConsumer<Object, Object> consumer = this.consumer(runContext)) {
-                        this.subscription = topicSubscription(runContext);
-                        this.subscription.subscribe(consumer, this);
-
-                        while (true) {
-                            consumer
-                                .poll(this.pollDuration)
-                                .forEach(fluxSink::next);
-
-                            consumer.commitSync();
-                        }
-                    }
-                } catch (Exception e) {
-                    fluxSink.error(e);
-                } finally {
-                    fluxSink.complete();
-                }
-            });
-    }
-
     public Message recordToMessage(ConsumerRecord<Object, Object> record) {
         return Message.builder()
             .key(record.key())
@@ -249,7 +224,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         return false;
     }
 
-    ConsumerSubscription topicSubscription(final RunContext runContext) throws IllegalVariableEvaluationException {
+    public ConsumerSubscription topicSubscription(final RunContext runContext) throws IllegalVariableEvaluationException {
         validateConfiguration();
 
         if (this.topic != null && (partitions != null && !partitions.isEmpty())) {
