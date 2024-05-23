@@ -37,20 +37,33 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "React to and consume messages from one or more Kafka topics creating one executions for each message."
+    title = "Consume messages from one or more Kafka topics and create exactly one execution per message."
 )
 @Plugin(
     examples = {
         @Example(
-            code = {
-                "topic: test_kestra",
-                "properties:",
-                "  bootstrap.servers: localhost:9092",
-                "serdeProperties:",
-                "  schema.registry.url: http://localhost:8085",
-                "keyDeserializer: STRING",
-                "valueDeserializer: AVRO",
-            }
+            title = "Consume messages from a Kafka topic",
+            full = true,
+            code = """
+                id: kafka
+                namespace: myteam
+
+                tasks:
+                - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "{{ trigger }}"
+
+                triggers:
+                - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: test_kestra
+                    properties:
+                    bootstrap.servers: localhost:9092
+                    serdeProperties:
+                    schema.registry.url: http://localhost:8085
+                    keyDeserializer: STRING
+                    valueDeserializer: AVRO
+                    groupId: kafkaConsumerGroupId"""
         )
     },
     beta = true
