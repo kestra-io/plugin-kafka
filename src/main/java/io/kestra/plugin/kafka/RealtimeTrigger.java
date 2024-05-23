@@ -68,7 +68,7 @@ import java.util.concurrent.atomic.AtomicReference;
     },
     beta = true
 )
-public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, ConsumeInterface {
+public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, KafkaConsumerInterface {
     private Map<String, String> properties;
 
     @Builder.Default
@@ -93,10 +93,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Builder.Default
     private Duration pollDuration = Duration.ofSeconds(5);
-
-    private Integer maxRecords;
-
-    private Duration maxDuration;
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -127,8 +123,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .valueDeserializer(this.valueDeserializer)
             .since(this.since)
             .pollDuration(this.pollDuration)
-            .maxRecords(this.maxRecords)
-            .maxDuration(this.maxDuration)
             .build();
 
         return Flux.from(publisher(task, runContext))
