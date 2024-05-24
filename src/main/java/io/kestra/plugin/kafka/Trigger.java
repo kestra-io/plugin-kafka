@@ -27,7 +27,7 @@ import java.util.Optional;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "React to and consume messages from one or more Kafka topics.",
+    title = "Consume messages periodically from Kafka topics and create one execution per batch.",
     description = "Note that you don't need an extra task to consume the message from the event trigger. The trigger will automatically consume messages and you can retrieve their content in your flow using the `{{ trigger.uri }}` variable."
 )
 @Plugin(

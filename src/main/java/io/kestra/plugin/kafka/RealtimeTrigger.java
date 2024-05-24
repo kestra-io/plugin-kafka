@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages from one or more Kafka topics and create exactly one execution per message."
+    title = "Consume a message in real-time from Kafka topics and create one execution per message."
 )
 @Plugin(
     examples = {
