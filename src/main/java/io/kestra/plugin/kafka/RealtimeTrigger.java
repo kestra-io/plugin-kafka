@@ -65,8 +65,7 @@ import java.util.concurrent.atomic.AtomicReference;
                     valueDeserializer: AVRO
                     groupId: kafkaConsumerGroupId"""
         )
-    },
-    beta = true
+    }
 )
 public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, KafkaConsumerInterface {
     private Map<String, String> properties;
