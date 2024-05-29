@@ -37,12 +37,13 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume a message in real-time from Kafka topics and create one execution per message."
+    title = "Consume a message in real-time from a Kafka topic and create one execution per message.",
+    description = "If you would like to consume multiple messages processed within a given time frame and process them in batch, you can use the [io.kestra.plugin.kafka.Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) instead."
 )
 @Plugin(
     examples = {
         @Example(
-            title = "Consume messages from a Kafka topic",
+            title = "Consume a message from a Kafka topic in real time.",
             full = true,
             code = """
                 id: kafka
