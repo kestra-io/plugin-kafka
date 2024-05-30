@@ -51,20 +51,20 @@ import java.util.concurrent.atomic.AtomicReference;
 
                 tasks:
                 - id: log
-                    type: io.kestra.plugin.core.log.Log
-                    message: "{{ trigger }}"
+                  type: io.kestra.plugin.core.log.Log
+                  message: "{{ trigger.value }}"
 
                 triggers:
                 - id: realtime_trigger
-                    type: io.kestra.plugin.kafka.RealtimeTrigger
-                    topic: test_kestra
-                    properties:
+                  type: io.kestra.plugin.kafka.RealtimeTrigger
+                  topic: test_kestra
+                  properties:
                     bootstrap.servers: localhost:9092
-                    serdeProperties:
+                  serdeProperties:
                     schema.registry.url: http://localhost:8085
                     keyDeserializer: STRING
                     valueDeserializer: AVRO
-                    groupId: kafkaConsumerGroupId"""
+                  groupId: kafkaConsumerGroupId"""
         )
     }
 )
