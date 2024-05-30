@@ -39,8 +39,11 @@ import java.util.Optional;
                 "  bootstrap.servers: localhost:9092",
                 "serdeProperties:",
                 "  schema.registry.url: http://localhost:8085",
-                "keyDeserializer: STRING",
-                "valueDeserializer: AVRO",
+                "  keyDeserializer: STRING",
+                "  valueDeserializer: AVRO",
+                "interval: PT30S",
+                "maxRecords: 5",
+                "groupId: kafkaConsumerGroupId",        
             }
         )
     }
