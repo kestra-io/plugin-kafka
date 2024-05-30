@@ -92,9 +92,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private String since;
 
     @Builder.Default
-    private Duration pollDuration = Duration.ofSeconds(5);
-
-    @Builder.Default
     @Getter(AccessLevel.NONE)
     private final AtomicBoolean isActive = new AtomicBoolean(true);
 
@@ -122,7 +119,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
             .since(this.since)
-            .pollDuration(this.pollDuration)
             .build();
 
         return Flux.from(publisher(task, runContext))
@@ -137,7 +133,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 task.topicSubscription(runContext).subscribe(consumer, task);
                 while (isActive.get()) {
                     try {
-                        consumer.poll(task.getPollDuration()).forEach(fluxSink::next);
+                        consumer.poll(Duration.ofMillis(Long.MAX_VALUE)).forEach(fluxSink::next);
                         consumer.commitSync();
                     } catch (org.apache.kafka.common.errors.InterruptException e) {
                         // ignore, this case is handle by next lines

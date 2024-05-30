@@ -63,11 +63,4 @@ public interface KafkaConsumerInterface {
     @PluginProperty(dynamic = true)
     String getSince();
 
-    @Schema(
-        title = "How often to poll for a record.",
-        description = "If no records are available, the maximum wait duration to wait for new records. "
-    )
-    @NotNull
-    @PluginProperty(dynamic = true)
-    Duration getPollDuration();
 }

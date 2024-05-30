@@ -24,4 +24,12 @@ public interface ConsumeInterface extends KafkaConsumerInterface {
     )
     @PluginProperty(dynamic = false)
     Duration getMaxDuration();
+
+    @Schema(
+        title = "How often to poll for a record.",
+        description = "If no records are available, the maximum wait duration to wait for new records. "
+    )
+    @NotNull
+    @PluginProperty(dynamic = true)
+    Duration getPollDuration();
 }
