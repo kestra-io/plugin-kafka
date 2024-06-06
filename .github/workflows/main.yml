@@ -47,7 +47,7 @@ jobs:
           java-version: 21
 
       - name: Validate Gradle wrapper
-        uses: gradle/wrapper-validation-action@v3
+        uses: gradle/actions/wrapper-validation@v3
 
       - name: Build the docker-compose stack
         if: ${{ github.event.inputs.skip-test == 'false' || github.event.inputs.skip-test == '' }}
