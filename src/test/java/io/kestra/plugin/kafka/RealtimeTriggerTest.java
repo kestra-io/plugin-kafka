@@ -18,6 +18,7 @@ import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -68,7 +69,7 @@ class RealtimeTriggerTest {
             List<Execution> executionList = new CopyOnWriteArrayList<>();
 
             // wait for execution
-            executionQueue.receive(execution -> {
+            Flux<Execution> receive = TestsUtils.receive(executionQueue, execution -> {
                 executionList.add(execution.getLeft());
 
                 if (queue1Count.getCount() == 0) {
@@ -85,16 +86,18 @@ class RealtimeTriggerTest {
             repositoryLoader.load(Objects.requireNonNull(RealtimeTriggerTest.class.getClassLoader().getResource("flows/realtime.yaml")));
 
             produce();
-            queue1Count.await(1, TimeUnit.MINUTES);
+            boolean await = queue1Count.await(1, TimeUnit.MINUTES);
+            assertThat(await, is(true));
             assertThat(executionList.size(), is(2));
             assertThat(executionList.stream().filter(execution -> execution.getTrigger().getVariables().get("key").equals("key1")).count(), is(1L));
             executionList.clear();
 
             produce();
-            queue2Count.await(1, TimeUnit.MINUTES);
+            await = queue2Count.await(1, TimeUnit.MINUTES);
+            assertThat(await, is(true));
             assertThat(executionList.size(), is(2));
             assertThat(executionList.stream().filter(execution -> execution.getTrigger().getVariables().get("key").equals("key2")).count(), is(1L));
-            executionList.clear();
+            receive.blockLast();
         }
     }
 
