@@ -53,7 +53,7 @@ dependencies {
     api group: "io.confluent", name: "kafka-avro-serializer", version: confluentVersion
     api group: "io.confluent", name: "kafka-protobuf-serializer", version: confluentVersion
     api group: "io.confluent", name: "kafka-json-serializer", version: confluentVersion
-    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.1.0'
+    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.1.1'
 
 }
 
