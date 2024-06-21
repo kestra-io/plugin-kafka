@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicReference;
             full = true,
             code = """
                 id: kafka
-                namespace: myteam
+                namespace: company.team
 
                 tasks:
                 - id: log

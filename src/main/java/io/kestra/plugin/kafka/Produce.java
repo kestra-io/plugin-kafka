@@ -60,7 +60,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
             full = true,
             code = {
                 "id: send_message_to_kafka",
-                "namespace: dev",
+                "namespace: company.team",
                 "inputs:",
                 "  - type: FILE",
                 "    id: file",
