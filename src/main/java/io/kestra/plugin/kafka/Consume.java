@@ -150,7 +150,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        File tempFile = runContext.tempFile(".ion").toFile();
+        File tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         try (
             BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile));
             KafkaConsumer<Object, Object> consumer = this.consumer(runContext)

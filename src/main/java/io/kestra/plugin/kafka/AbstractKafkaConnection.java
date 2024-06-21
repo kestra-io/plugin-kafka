@@ -40,7 +40,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
         mapProperties
             .forEach(throwBiConsumer((key, value) -> {
                 if (key.equals(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG) || key.equals(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG)) {
-                    Path path = runContext.tempFile(Base64.getDecoder().decode(runContext.render(value).replace("\n", "")));
+                    Path path = runContext.workingDir().createTempFile(Base64.getDecoder().decode(runContext.render(value).replace("\n", "")));
                     properties.put(key, path.toAbsolutePath().toString());
                 } else {
                     properties.put(key, runContext.render(value));
