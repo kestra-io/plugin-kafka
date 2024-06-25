@@ -122,7 +122,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .build();
 
         return Flux.from(publisher(task, runContext))
-            .map((record) -> TriggerService.generateRealtimeExecution(this, context, task.recordToMessage(record)));
+            .map((record) -> TriggerService.generateRealtimeExecution(this, conditionContext, context, task.recordToMessage(record)));
     }
 
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
