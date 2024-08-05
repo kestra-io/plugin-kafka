@@ -56,7 +56,16 @@ dependencies {
     api group: "io.confluent", name: "kafka-schema-registry-client", version: confluentVersion
     api group: "io.confluent", name: "kafka-avro-serializer", version: confluentVersion
     api group: "io.confluent", name: "kafka-protobuf-serializer", version: confluentVersion
-    api group: "io.confluent", name: "kafka-json-serializer", version: confluentVersion
+    api (group: "io.confluent", name: "kafka-json-serializer", version: confluentVersion) {
+        // excluded from the driver and included manually after to take the version from the platform
+        exclude group: 'com.fasterxml.jackson.core'
+        exclude group: 'com.fasterxml.jackson.datatype'
+        exclude group: 'com.fasterxml.jackson.module'
+    }
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
     api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.1.0'
 
 }
