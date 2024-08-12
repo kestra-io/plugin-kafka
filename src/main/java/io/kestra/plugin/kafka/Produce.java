@@ -41,7 +41,6 @@ import java.util.Properties;
 import java.util.stream.Collectors;
 import jakarta.validation.constraints.NotNull;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -200,7 +199,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 if (this.from instanceof String) {
                     URI from = new URI(runContext.render((String) this.from));
                     try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.storage().getFile(from)))) {
-                        flowable = Flux.create(FileSerde.reader(inputStream), FluxSink.OverflowStrategy.BUFFER);
+                        flowable = FileSerde.readAll(inputStream);
                         resultFlowable = this.buildFlowable(flowable, runContext, producer);
 
                         count = resultFlowable
