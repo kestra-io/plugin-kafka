@@ -12,14 +12,12 @@ import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.FluxSink;
 
 import java.io.*;
 import java.net.URI;
@@ -29,7 +27,6 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.util.*;
-import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -483,8 +480,8 @@ public class KafkaTest {
 
     private static void assertOutputFile(RunContext runContext, Consume.Output consumeOutput) throws IOException {
         InputStream is = runContext.storage().getFile(consumeOutput.getUri());
-        Consumer<FluxSink<Map>> reader = FileSerde.reader(new BufferedReader(new InputStreamReader(is)), Map.class);
-        Map<String, Object> result = Flux.create(reader).blockLast();
+        Flux<Map> reader = FileSerde.readAll(new BufferedReader(new InputStreamReader(is)), Map.class);
+        Map<String, Object> result = reader.blockLast();
         Assertions.assertNotNull(result);
         Assertions.assertTrue(result.containsKey("key"));
         Assertions.assertTrue(result.containsKey("value"));
