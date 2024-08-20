@@ -4,6 +4,7 @@ import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.GenericRecordToMapDeserializer;
@@ -32,21 +33,22 @@ import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 @NoArgsConstructor
 public abstract class AbstractKafkaConnection extends Task implements KafkaConnectionInterface {
     @NotNull
-    protected Map<String, String> properties;
+    protected Property<Map<String, String>> properties;
 
     @Builder.Default
-    protected Map<String, String> serdeProperties = Collections.emptyMap();
+    protected Property<Map<String, String>> serdeProperties = Property.of(Collections.emptyMap());
 
-    protected static Properties createProperties(Map<String, String> mapProperties, RunContext runContext) throws Exception {
+    protected static Properties createProperties(Property<Map<String, String>> mapProperties, RunContext runContext) throws Exception {
         Properties properties = new Properties();
 
         mapProperties
+            .asMap(runContext, String.class, String.class)
             .forEach(throwBiConsumer((key, value) -> {
                 if (key.equals(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG) || key.equals(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG)) {
-                    Path path = runContext.workingDir().createTempFile(Base64.getDecoder().decode(runContext.render(value).replace("\n", "")));
+                    Path path = runContext.workingDir().createTempFile(Base64.getDecoder().decode(value.replace("\n", "")));
                     properties.put(key, path.toAbsolutePath().toString());
                 } else {
-                    properties.put(key, runContext.render(value));
+                    properties.put(key, value);
                 }
             }));
 

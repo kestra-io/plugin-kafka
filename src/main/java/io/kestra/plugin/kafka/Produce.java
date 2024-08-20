@@ -6,13 +6,16 @@ import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
+import io.kestra.core.models.property.Data;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import jakarta.annotation.Nullable;
-import java.util.Optional;
+
+import java.util.*;
+
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -27,21 +30,14 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.Serializer;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
 import java.util.stream.Collectors;
 import jakarta.validation.constraints.NotNull;
-import reactor.core.publisher.Flux;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -99,7 +95,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                       schema.registry.url: http://localhost:8085
                     topic: test_kestra
                     valueAvroSchema: |
-                      {"type":"record","name":"twitter_schema","namespace":"io.kestra.examples","fields":[{"name":"username","type":"string"},{"name\":"tweet","type":"string"}]}
+                      {"type":"record","name":"twitter_schema","namespace":"io.kestra.examples","fields":[{"name":"username","type":"string"},{"name":"tweet","type":"string"}]}
                     valueSerializer: AVRO
                 """
         )
@@ -110,8 +106,8 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         title = "Kafka topic to which the message should be sent.",
         description = "Could also be passed inside the `from` property using the key `topic`."
     )
-    @PluginProperty(dynamic = true)
-    private String topic;
+    @Nullable
+    private Property<String> topic;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "The content of the message to be sent to Kafka.",
@@ -119,46 +115,63 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             "The following keys are supported: `key`, `value`, `partition`, `timestamp`, and `headers`.",
         anyOf = {String.class, List.class, Map.class}
     )
-    @NotNull
     @PluginProperty(dynamic = true)
+    @Deprecated
     private Object from;
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public void setFrom(Object from) {
+        this.from = from;
+
+        if (from instanceof String str) {
+            var prop = Property.of(URI.create(str));
+            this.data = Data.<Map>builder().fromURI(prop).build();
+        } else if (from instanceof List list) {
+            var prop = Property.of((List<Map<String, Object>>) list);
+            this.data = Data.<Map>builder().fromList(prop).build();
+        } else if (from instanceof Map map) {
+            var prop = Property.of((Map<String, Object>) map);
+            this.data = Data.<Map>builder().fromMap(prop).build();
+        } else {
+            throw new IllegalArgumentException("'from' is from an unknown type: " + from.getClass().getName());
+        }
+    }
+
+    @NotNull
+    private Data<Map> data;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "The serializer used for the key.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
-    @PluginProperty(dynamic = true)
     @Builder.Default
-    private SerdeType keySerializer = SerdeType.STRING;
+    private Property<SerdeType> keySerializer = Property.of(SerdeType.STRING);
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "The serializer used for the value.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
-    @PluginProperty(dynamic = true)
     @Builder.Default
-    private SerdeType valueSerializer = SerdeType.STRING;
+    private Property<SerdeType> valueSerializer = Property.of(SerdeType.STRING);
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Avro Schema if the key is set to `AVRO` type."
     )
-    @PluginProperty(dynamic = true)
-    private String keyAvroSchema;
+    private Property<String> keyAvroSchema;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Avro Schema if the value is set to `AVRO` type."
     )
-    @PluginProperty(dynamic = true)
-    private String valueAvroSchema;
+    @Nullable
+    private Property<String> valueAvroSchema;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Whether the producer should be transactional."
     )
     @Builder.Default
-    @PluginProperty
-    private boolean transactional = true;
+    private Property<Boolean> transactional = Property.of(Boolean.TRUE);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -172,88 +185,61 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
         Properties properties = createProperties(this.properties, runContext);
-        if (transactional) {
+        if (Boolean.TRUE.equals(transactional.as(runContext, Boolean.class))) {
             properties.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, IdUtils.create());
         }
 
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
 
-        Serializer keySerial = getTypedSerializer(this.keySerializer, parseAvroSchema(runContext, keyAvroSchema));
-        Serializer valSerial = getTypedSerializer(this.valueSerializer, parseAvroSchema(runContext, valueAvroSchema));
+        Serializer keySerial = getTypedSerializer(this.keySerializer.as(runContext, SerdeType.class),
+            parseAvroSchema(runContext, keyAvroSchema)
+        );
+        Serializer valSerial = getTypedSerializer(this.valueSerializer.as(runContext, SerdeType.class),
+            parseAvroSchema(runContext, valueAvroSchema)
+        );
 
         keySerial.configure(serdesProperties, true);
         valSerial.configure(serdesProperties, false);
 
 
-        KafkaProducer<Object, Object> producer = null;
-        try {
-            producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
-            Integer count = 1;
-
-            if (transactional) {
+        ;
+        try (KafkaProducer<Object, Object> producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial)) {
+            if (Boolean.TRUE.equals(transactional.as(runContext, Boolean.class))) {
                 producer.initTransactions();
                 producer.beginTransaction();
             }
 
-            if (this.from instanceof String || this.from instanceof List) {
-                Flux<Object> flowable;
-                Flux<Integer> resultFlowable;
-                if (this.from instanceof String) {
-                    URI from = new URI(runContext.render((String) this.from));
-                    try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.storage().getFile(from)))) {
-                        flowable = FileSerde.readAll(inputStream);
-                        resultFlowable = this.buildFlowable(flowable, runContext, producer);
-
-                        count = resultFlowable
-                            .reduce(Integer::sum)
-                            .blockOptional().orElse(0);
-                    }
-                } else {
-                    flowable = Flux.fromArray(((List<Object>) this.from).toArray());
-                    resultFlowable = this.buildFlowable(flowable, runContext, producer);
-
-                    count = resultFlowable.reduce(Integer::sum).blockOptional().orElse(0);
-                }
-            } else {
-                producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) this.from));
-            }
+            Integer count = data.flux(runContext, Map.class, map -> map)
+                .map(throwFunction(row -> {
+                    producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) row));
+                    return 1;
+                }))
+                .reduce(Integer::sum)
+                .blockOptional()
+                .orElse(0);
 
             // metrics
             runContext.metric(Counter.of("records", count));
 
+            if (Boolean.TRUE.equals(transactional.as(runContext, Boolean.class))) {
+                producer.commitTransaction();
+            }
+
             return Output.builder()
                 .messagesCount(count)
                 .build();
-        } finally {
-            if (producer != null) {
-                if (transactional) {
-                    producer.commitTransaction();
-                }
-                producer.flush();
-                producer.close();
-            }
         }
     }
 
     @Nullable
-    private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable String avroSchema) throws IllegalVariableEvaluationException {
-        return Optional.ofNullable(avroSchema).map(throwFunction(runContext::render)).map(AvroSchema::new).orElse(null);
+    private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable Property<String> avroSchema) throws IllegalVariableEvaluationException {
+        return Optional.ofNullable(avroSchema).map(throwFunction(schema -> schema.as(runContext, String.class))).map(AvroSchema::new).orElse(null);
     }
 
-    @SuppressWarnings("unchecked")
-    private Flux<Integer> buildFlowable(Flux<Object> flowable, RunContext runContext, KafkaProducer<Object, Object> producer) throws Exception {
-        return flowable
-            .map(throwFunction(row -> {
-                producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) row));
-                return 1;
-            }));
-    }
-
-    @SuppressWarnings("unchecked")
     private ProducerRecord<Object, Object> producerRecord(RunContext runContext, KafkaProducer<Object, Object> producer, Map<String, Object> map) throws Exception {
         Object key;
         Object value;
-        String topic;
+        String topic = null;
 
         map = runContext.render(map);
 
@@ -262,8 +248,8 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         if (map.containsKey("topic")) {
             topic = runContext.render((String) map.get("topic"));
-        } else {
-            topic = runContext.render(this.topic);
+        } else if (this.topic != null) {
+            topic = this.topic.as(runContext, String.class);
         }
 
         // just to test that connection to brokers works

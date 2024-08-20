@@ -2,6 +2,8 @@ package io.kestra.plugin.kafka;
 
 import com.google.common.collect.ImmutableMap;
 import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.property.Data;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.queues.QueueFactoryInterface;
 import io.kestra.core.queues.QueueInterface;
 import io.kestra.core.repositories.LocalFlowRepositoryLoader;
@@ -112,21 +114,18 @@ class RealtimeTriggerTest {
         Produce task = Produce.builder()
             .id(RealtimeTriggerTest.class.getSimpleName())
             .type(Produce.class.getName())
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.STRING)
-            .topic("tu_stream")
-            .from(List.of(
-                ImmutableMap.builder()
-                    .put("key", "key1")
-                    .put("value", "value1")
-                    .build(),
-                ImmutableMap.builder()
-                    .put("key", "key2")
-                    .put("value", "value2")
-                    .build()
-            ))
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.STRING))
+            .topic(Property.of("tu_stream"))
+            .data(Data.<Map>builder()
+                .fromList(Property.of(List.of(
+                    Map.of("key", "key1", "value", "value1"),
+                    Map.of("key", "key2", "value", "value2")
+                )))
+                .build()
+            )
             .build();
 
         task.run(TestsUtils.mockRunContext(runContextFactory, task, ImmutableMap.of()));

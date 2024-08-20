@@ -2,6 +2,7 @@ package io.kestra.plugin.kafka;
 
 import com.google.common.collect.ImmutableMap;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.junit.annotations.KestraTest;
@@ -45,7 +46,7 @@ class ConsumeTest {
         Consume task = Consume
             .builder()
             .topic("topic")
-            .topicPattern(".*")
+            .topicPattern(Property.of(".*"))
             .build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -57,7 +58,7 @@ class ConsumeTest {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
         Consume task = Consume
             .builder()
-            .topicPattern(".*")
+            .topicPattern(Property.of(".*"))
             .build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -74,7 +75,7 @@ class ConsumeTest {
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
-        subscription.subscribe(new MockConsumer<>(OffsetResetStrategy.EARLIEST), task);
+        subscription.subscribe(runContext, new MockConsumer<>(OffsetResetStrategy.EARLIEST), task);
 
         // Then
         Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
@@ -89,7 +90,7 @@ class ConsumeTest {
         Consume task = Consume
             .builder()
             .topic("topic")
-            .since(now.toString())
+            .since(Property.of(now.toString()))
             .build();
 
         // When
@@ -109,8 +110,8 @@ class ConsumeTest {
         Consume task = Consume
             .builder()
             .topic("topic")
-            .partitions(List.of(0))
-            .since(now.toString())
+            .partitions(Property.of(List.of(0)))
+            .since(Property.of(now.toString()))
             .build();
 
         // When
@@ -129,7 +130,7 @@ class ConsumeTest {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
         Consume task = Consume
             .builder()
-            .groupId("groupId")
+            .groupId(Property.of("groupId"))
             .topic("topic")
             .build();
 
@@ -137,7 +138,7 @@ class ConsumeTest {
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
 
         // Then
-        Assertions.assertDoesNotThrow(() -> subscription.subscribe(new MockConsumer<>(OffsetResetStrategy.EARLIEST), task));
+        Assertions.assertDoesNotThrow(() -> subscription.subscribe(runContext, new MockConsumer<>(OffsetResetStrategy.EARLIEST), task));
         Assertions.assertTrue(subscription instanceof Consume.TopicListSubscription);
         Assertions.assertEquals(List.of("topic"), ((Consume.TopicListSubscription) subscription).topics());
     }
@@ -151,15 +152,15 @@ class ConsumeTest {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
         Consume task = Consume
             .builder()
-            .groupId("groupId")
-            .topicPattern(".*")
+            .groupId(Property.of("groupId"))
+            .topicPattern(Property.of(".*"))
             .build();
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
 
         // Then
-        Assertions.assertDoesNotThrow(() -> subscription.subscribe(consumer, task));
+        Assertions.assertDoesNotThrow(() -> subscription.subscribe(runContext, consumer, task));
         Assertions.assertTrue(subscription instanceof Consume.TopicPatternSubscription);
         Assertions.assertEquals(".*", ((Consume.TopicPatternSubscription) subscription).pattern().pattern());
     }
