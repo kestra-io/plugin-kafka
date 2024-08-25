@@ -53,33 +53,47 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 @Plugin(
     examples = {
         @Example(
-            code = {
-                "topic: test_kestra",
-                "properties:",
-                "  bootstrap.servers: localhost:9092",
-                "serdeProperties:",
-                "  schema.registry.url: http://localhost:8085",
-                "keyDeserializer: STRING",
-                "valueDeserializer: AVRO",
-            }
+            full = true,
+            code = """
+                id: kafka_consume
+                namespace: company.team
+
+                tasks:
+                  - id: consume
+                    type: io.kestra.plugin.kafka.Consume
+                    topic: test_kestra
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    serdeProperties:
+                      schema.registry.url: http://localhost:8085
+                    keyDeserializer: STRING
+                    valueDeserializer: AVRO
+                """
         ),
         @Example(
             title = "Connect to a Kafka cluster with SSL.",
-            code = {
-                "properties:",
-                "  security.protocol: SSL",
-                "  bootstrap.servers: localhost:19092",
-                "  ssl.key.password: my-ssl-password",
-                "  ssl.keystore.type: PKCS12",
-                "  ssl.keystore.location: my-base64-encoded-keystore",
-                "  ssl.keystore.password: my-ssl-password",
-                "  ssl.truststore.location: my-base64-encoded-truststore",
-                "  ssl.truststore.password: my-ssl-password",
-                "topic:",
-                "- kestra_workerinstance",
-                "keyDeserializer: STRING",
-                "valueDeserializer: STRING"
-            }
+            full = true,
+            code = """
+                id: kafka_consume
+                namespace: company.team
+
+                tasks:
+                  - id: consume
+                    type: io.kestra.plugin.kafka.Consume
+                    properties:
+                      security.protocol: SSL
+                      bootstrap.servers: localhost:19092
+                      ssl.key.password: my-ssl-password
+                      ssl.keystore.type: PKCS12
+                      ssl.keystore.location: my-base64-encoded-keystore
+                      ssl.keystore.password: my-ssl-password
+                      ssl.truststore.location: my-base64-encoded-truststore
+                      ssl.truststore.password: my-ssl-password
+                    topic:
+                      - kestra_workerinstance
+                    keyDeserializer: STRING
+                    valueDeserializer: STRING
+                """
         )
     }
 )

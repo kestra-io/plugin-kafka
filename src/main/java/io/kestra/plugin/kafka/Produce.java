@@ -57,49 +57,50 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
         @Example(
             title = "Read a CSV file, transform it and send it to Kafka.",
             full = true,
-            code = {
-                "id: send_message_to_kafka",
-                "namespace: company.team",
-                "inputs:",
-                "  - id: file",
-                "    type: FILE",
-                "    description: A CSV file with columns: id, username, tweet, and timestamp.",
-                "",
-                "tasks:",
-                "  - id: csv_to_ion",
-                "    type: io.kestra.plugin.serdes.csv.CsvToIon",
-                "    from: \"{{ inputs.file }}\"",
-                "",
-                "  - id: ion_to_avro_schema",
-                "    type: io.kestra.plugin.scripts.nashorn.FileTransform",
-                "    from: \"{{ outputs.csvReader.uri }}\"",
-                "    script: |",
-                "      var result = {",
-                "        \"key\": row.id,",
-                "        \"value\": {",
-                "          \"username\": row.username,",
-                "          \"tweet\": row.tweet",
-                "        },",
-                "        \"timestamp\": row.timestamp,",
-                "        \"headers\": {",
-                "          \"key\": \"value\"",
-                "        }",
-                "      };",
-                "      row = result",
-                "",
-                "  - id: avro_to_kafka",
-                "    type: io.kestra.plugin.kafka.Produce",
-                "    from: \"{{ outputs.ion_to_avro_schema.uri }}\"",
-                "    keySerializer: STRING",
-                "    properties:",
-                "      bootstrap.servers: localhost:9092",
-                "    serdeProperties:",
-                "      schema.registry.url: http://localhost:8085",
-                "    topic: test_kestra",
-                "    valueAvroSchema: |",
-                "      {\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"io.kestra.examples\",\"fields\":[{\"name\":\"username\",\"type\":\"string\"},{\"name\":\"tweet\",\"type\":\"string\"}]}",
-                "    valueSerializer: AVRO\n"
-            }
+            code = """
+                id: send_message_to_kafka
+                namespace: company.team
+
+                inputs:
+                  - id: file
+                    type: FILE
+                    description: A CSV file with columns: id, username, tweet, and timestamp.
+                
+                tasks:
+                  - id: csv_to_ion
+                    type: io.kestra.plugin.serdes.csv.CsvToIon
+                    from: "{{ inputs.file }}"
+                
+                  - id: ion_to_avro_schema
+                    type: io.kestra.plugin.scripts.nashorn.FileTransform
+                    from: "{{ outputs.csv_to_ion.uri }}"
+                    script: |
+                      var result = {
+                        "key": row.id,
+                        "value": {
+                          "username": row.username,
+                          "tweet": row.tweet
+                        },
+                        "timestamp": row.timestamp,
+                        "headers": {
+                          "key": "value"
+                        }
+                      };
+                      row = result
+                
+                  - id: avro_to_kafka
+                    type: io.kestra.plugin.kafka.Produce
+                    from: "{{ outputs.ion_to_avro_schema.uri }}"
+                    keySerializer: STRING
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    serdeProperties:
+                      schema.registry.url: http://localhost:8085
+                    topic: test_kestra
+                    valueAvroSchema: |
+                      {"type":"record","name":"twitter_schema","namespace":"io.kestra.examples","fields":[{"name":"username","type":"string"},{"name\":"tweet","type":"string"}]}
+                    valueSerializer: AVRO
+                """
         )
     }
 )
