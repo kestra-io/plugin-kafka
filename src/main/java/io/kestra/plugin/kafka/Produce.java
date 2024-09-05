@@ -210,9 +210,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                     flowable = Flux.fromArray(((List<Object>) this.from).toArray());
                     resultFlowable = this.buildFlowable(flowable, runContext, producer);
 
-                    count = resultFlowable
-                        .reduce(Integer::sum)
-                        .blockOptional().orElse(0);
+                    count = resultFlowable.reduce(Integer::sum).blockOptional().orElse(0);
                 }
             } else {
                 producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) this.from));
