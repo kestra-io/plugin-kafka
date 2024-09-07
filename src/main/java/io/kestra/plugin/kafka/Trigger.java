@@ -33,18 +33,30 @@ import java.util.Optional;
 @Plugin(
     examples = {
         @Example(
-            code = {
-                "topic: test_kestra",
-                "properties:",
-                "  bootstrap.servers: localhost:9092",
-                "serdeProperties:",
-                "  schema.registry.url: http://localhost:8085",
-                "  keyDeserializer: STRING",
-                "  valueDeserializer: AVRO",
-                "interval: PT30S",
-                "maxRecords: 5",
-                "groupId: kafkaConsumerGroupId",        
-            }
+            full = true,
+            code = """
+                id: kafka_trigger
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "{{ trigger.value }}"
+
+                triggers:
+                  - id: trigger
+                    type: io.kestra.plugin.kafka.Trigger
+                    topic: test_kestra
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    serdeProperties:
+                      schema.registry.url: http://localhost:8085
+                      keyDeserializer: STRING
+                      valueDeserializer: AVRO
+                    interval: PT30S
+                    maxRecords: 5
+                    groupId: kafkaConsumerGroupId
+                """
         )
     }
 )

@@ -46,25 +46,25 @@ import java.util.concurrent.atomic.AtomicReference;
             title = "Consume a message from a Kafka topic in real time.",
             full = true,
             code = """
-                id: kafka
+                id: kafka_realtime_trigger
                 namespace: company.team
 
                 tasks:
-                - id: log
-                  type: io.kestra.plugin.core.log.Log
-                  message: "{{ trigger.value }}"
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "{{ trigger.value }}"
 
                 triggers:
-                - id: realtime_trigger
-                  type: io.kestra.plugin.kafka.RealtimeTrigger
-                  topic: test_kestra
-                  properties:
-                    bootstrap.servers: localhost:9092
-                  serdeProperties:
-                    schema.registry.url: http://localhost:8085
-                    keyDeserializer: STRING
-                    valueDeserializer: AVRO
-                  groupId: kafkaConsumerGroupId"""
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: test_kestra
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    serdeProperties:
+                      schema.registry.url: http://localhost:8085
+                      keyDeserializer: STRING
+                      valueDeserializer: AVRO
+                    groupId: kafkaConsumerGroupId"""
         )
     }
 )
