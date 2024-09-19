@@ -52,16 +52,18 @@ public class KafkaTest {
               },
               {
                 "name": "stat",
-                "type": {
-                  "type": "record",
-                  "name": "stat",
-                  "fields": [
-                    {
-                      "name": "followers_count",
-                      "type": "long"
-                    }
-                  ]
-                }
+                "type": [
+                  "null", {
+                    "type": "record",
+                    "name": "stat",
+                    "fields": [
+                      {
+                        "name": "followers_count",
+                        "type": "long"
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           }
