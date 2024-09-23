@@ -1,5 +1,6 @@
 package io.kestra.plugin.kafka;
 
+import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
@@ -7,7 +8,9 @@ import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.GenericRecordToMapDeserializer;
 import io.kestra.plugin.kafka.serdes.KafkaAvroSerializer;
+import io.kestra.plugin.kafka.serdes.MapToGenericRecordSerializer;
 import io.kestra.plugin.kafka.serdes.SerdeType;
+import jakarta.annotation.Nullable;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
@@ -50,69 +53,39 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
         return properties;
     }
 
-    protected static Serializer<?> getTypedSerializer(SerdeType s) throws Exception {
-        switch (s) {
-            case STRING:
-                return new StringSerializer();
-            case INTEGER:
-                return new IntegerSerializer();
-            case FLOAT:
-                return new FloatSerializer();
-            case DOUBLE:
-                return new DoubleSerializer();
-            case LONG:
-                return new LongSerializer();
-            case SHORT:
-                return new ShortSerializer();
-            case BYTE_ARRAY:
-                return new ByteArraySerializer();
-            case BYTE_BUFFER:
-                return new ByteBufferSerializer();
-            case BYTES:
-                return new BytesSerializer();
-            case UUID:
-                return new UUIDSerializer();
-            case VOID:
-                return new VoidSerializer();
-            case AVRO:
-                return new KafkaAvroSerializer();
-            case JSON:
-                return new KafkaJsonSerializer<>();
-            default:
-                throw new Exception();
-        }
+    protected static Serializer<?> getTypedSerializer(SerdeType s, @Nullable AvroSchema avroSchema) {
+        return switch (s) {
+            case STRING -> new StringSerializer();
+            case INTEGER -> new IntegerSerializer();
+            case FLOAT -> new FloatSerializer();
+            case DOUBLE -> new DoubleSerializer();
+            case LONG -> new LongSerializer();
+            case SHORT -> new ShortSerializer();
+            case BYTE_ARRAY -> new ByteArraySerializer();
+            case BYTE_BUFFER -> new ByteBufferSerializer();
+            case BYTES -> new BytesSerializer();
+            case UUID -> new UUIDSerializer();
+            case VOID -> new VoidSerializer();
+            case AVRO -> new MapToGenericRecordSerializer(new KafkaAvroSerializer(), avroSchema);
+            case JSON -> new KafkaJsonSerializer<>();
+        };
     }
 
-    protected static Deserializer<?> getTypedDeserializer(SerdeType s) throws Exception {
-        switch (s) {
-            case STRING:
-                return new StringDeserializer();
-            case INTEGER:
-                return new IntegerDeserializer();
-            case FLOAT:
-                return new FloatDeserializer();
-            case DOUBLE:
-                return new DoubleDeserializer();
-            case LONG:
-                return new LongDeserializer();
-            case SHORT:
-                return new ShortDeserializer();
-            case BYTE_ARRAY:
-                return new ByteArrayDeserializer();
-            case BYTE_BUFFER:
-                return new ByteBufferDeserializer();
-            case BYTES:
-                return new BytesDeserializer();
-            case UUID:
-                return new UUIDDeserializer();
-            case VOID:
-                return new VoidDeserializer();
-            case AVRO:
-                return new GenericRecordToMapDeserializer(new KafkaAvroDeserializer());
-            case JSON:
-                return new KafkaJsonDeserializer<>();
-            default:
-                throw new Exception();
-        }
+    protected static Deserializer<?> getTypedDeserializer(SerdeType s) {
+        return switch (s) {
+            case STRING -> new StringDeserializer();
+            case INTEGER -> new IntegerDeserializer();
+            case FLOAT -> new FloatDeserializer();
+            case DOUBLE -> new DoubleDeserializer();
+            case LONG -> new LongDeserializer();
+            case SHORT -> new ShortDeserializer();
+            case BYTE_ARRAY -> new ByteArrayDeserializer();
+            case BYTE_BUFFER -> new ByteBufferDeserializer();
+            case BYTES -> new BytesDeserializer();
+            case UUID -> new UUIDDeserializer();
+            case VOID -> new VoidDeserializer();
+            case AVRO -> new GenericRecordToMapDeserializer(new KafkaAvroDeserializer());
+            case JSON -> new KafkaJsonDeserializer<>();
+        };
     }
 }

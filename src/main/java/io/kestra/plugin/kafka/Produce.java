@@ -1,5 +1,7 @@
 package io.kestra.plugin.kafka;
 
+import io.confluent.kafka.schemaregistry.avro.AvroSchema;
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -9,6 +11,8 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
+import jakarta.annotation.Nullable;
+import java.util.Optional;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -16,9 +20,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
-import org.apache.avro.Schema;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -175,8 +176,8 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
 
-        Serializer keySerial = getTypedSerializer(this.keySerializer);
-        Serializer valSerial = getTypedSerializer(this.valueSerializer);
+        Serializer keySerial = getTypedSerializer(this.keySerializer, parseAvroSchema(runContext, keyAvroSchema));
+        Serializer valSerial = getTypedSerializer(this.valueSerializer, parseAvroSchema(runContext, valueAvroSchema));
 
         keySerial.configure(serdesProperties, true);
         valSerial.configure(serdesProperties, false);
@@ -234,24 +235,9 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         }
     }
 
-    private GenericRecord buildAvroRecord(RunContext runContext, String dataSchema, Map<String, Object> map) throws Exception {
-        Schema.Parser parser = new Schema.Parser();
-        Schema schema = parser.parse(runContext.render(dataSchema));
-        return buildAvroRecord(schema, map);
-    }
-
-    private GenericRecord buildAvroRecord(Schema schema, Map<String, Object> map) {
-        GenericRecord avroRecord = new GenericData.Record(schema);
-        for (String k : map.keySet()) {
-            Object value = map.get(k);
-            Schema fieldSchema = schema.getField(k).schema();
-            if (fieldSchema.getType().equals(Schema.Type.RECORD)) {
-                avroRecord.put(k, buildAvroRecord(fieldSchema, (Map<String, Object>) value));
-            } else {
-                avroRecord.put(k, value);
-            }
-        }
-        return avroRecord;
+    @Nullable
+    private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable String avroSchema) throws IllegalVariableEvaluationException {
+        return Optional.ofNullable(avroSchema).map(throwFunction(runContext::render)).map(AvroSchema::new).orElse(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -271,18 +257,8 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         map = runContext.render(map);
 
-        if (this.keySerializer == SerdeType.AVRO) {
-            key = buildAvroRecord(runContext, this.keyAvroSchema, (Map<String, Object>) map.get("key"));
-        } else {
-            key = map.get("key");
-        }
-
-        if (this.valueSerializer == SerdeType.AVRO) {
-            value = buildAvroRecord(runContext, this.valueAvroSchema, (Map<String, Object>) map.get("value"));
-        } else {
-            value = map.get("value");
-        }
-
+        key = map.get("key");
+        value = map.get("value");
 
         if (map.containsKey("topic")) {
             topic = runContext.render((String) map.get("topic"));
