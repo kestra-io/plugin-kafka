@@ -51,7 +51,7 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
     }
 
     private static Object buildUnionValue(Schema schema, Object value) {
-        // TODO
+        // TODO using the first non-null schema allows support for optional values, but not polymorphism
         for (Schema s : schema.getTypes()) {
             if (!s.getType().equals(Schema.Type.NULL)) {
                 return buildValue(s, value);
@@ -61,7 +61,6 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
     }
 
     private static GenericFixed buildFixedValue(Schema schema, byte[] data) {
-        // TODO
         return new org.apache.avro.generic.GenericData.Fixed(schema, data);
     }
 
