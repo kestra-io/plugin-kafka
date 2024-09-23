@@ -29,6 +29,7 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Stream;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -412,6 +413,320 @@ public class KafkaTest {
             .build();
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withUnion_andRecord() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("product", Map.of("id", "v1"));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "product",
+                              "type": [
+                                "null",
+                                {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}
+                              ]
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+
+    @Test
+    void produceAvro_withUnion_andRecord_null() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("product", null);
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "product",
+                              "type": [
+                                "null",
+                                {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}
+                              ]
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withRecord() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("address", Map.of("city", "Paris", "country", "FR", "longitude", 2.3522, "latitude", 48.8566));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "address",
+                              "type": {
+                                "type": "record",
+                                "name": "Address",
+                                "fields": [
+                                  {"name": "city", "type": "string"},
+                                  {"name": "country", "type": "string"},
+                                  {"name": "longitude", "type": "float"},
+                                  {"name": "latitude", "type": "float"}
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withMap() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("map", Map.of("foo", 42, "bar", 17));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "map",
+                              "type": {"type": "map", "values": "int"}
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withMap_andRecord() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("map", Map.of("foo", Map.of("id", "v1"), "bar", Map.of("id", "v2")));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "map",
+                              "type": {"type": "map", "values": {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}}
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withArray() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("array", List.of("foo", "bar"));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "array",
+                              "type": {"type": "array", "items": "string"}
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withArray_andRecord() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("array", List.of(Map.of("id", "v1"), Map.of("id", "v2")));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "array",
+                              "type": {"type": "array", "items": {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}}
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withEnum() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("state", "SUCCESS");
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "state",
+                              "type": {"name": "StateEnum", "type": "enum", "symbols": ["SUCCESS", "FAILED"]}
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withFixed() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("base64", Base64.getEncoder().encode("Hello, World!".getBytes(UTF_8)));
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "base64",
+                              "type": {"name": "Base64", "type": "fixed", "size": 16}
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
     }
 
     @Test
