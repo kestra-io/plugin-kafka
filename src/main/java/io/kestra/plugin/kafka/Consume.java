@@ -6,6 +6,7 @@ import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.executions.metrics.Counter;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
@@ -41,6 +42,7 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static io.kestra.core.utils.Rethrow.throwConsumer;
+import static io.kestra.core.utils.Rethrow.throwFunction;
 
 @SuperBuilder
 @ToString
@@ -100,29 +102,35 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output>, ConsumeInterface {
     private Object topic;
 
-    private String topicPattern;
+    @Nullable
+    private Property<String> topicPattern;
 
-    private List<Integer> partitions;
+    @Nullable
+    private Property<List<Integer>> partitions;
 
-    private String groupId;
-
-    @Builder.Default
-    private SerdeType keyDeserializer = SerdeType.STRING;
-
-    @Builder.Default
-    private SerdeType valueDeserializer = SerdeType.STRING;
-
-    private String since;
+    @Nullable
+    private Property<String> groupId;
 
     @Builder.Default
-    private Duration pollDuration = Duration.ofSeconds(5);
+    private Property<SerdeType> keyDeserializer = Property.of(SerdeType.STRING);
 
-    private Integer maxRecords;
+    @Builder.Default
+    private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
 
-    private Duration maxDuration;
+    @Nullable
+    private Property<String> since;
+
+    @Builder.Default
+    private Property<Duration> pollDuration = Property.of(Duration.ofSeconds(5));
+
+    @Nullable
+    private Property<Integer> maxRecords;
+
+    @Nullable
+    private Property<Duration> maxDuration;
 
     @Getter(AccessLevel.PACKAGE)
-    private ConsumerSubscription subscription;
+    private transient ConsumerSubscription subscription;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
@@ -132,10 +140,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         final Properties consumerProps = createProperties(this.properties, runContext);
 
         if (this.groupId != null) {
-            consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, runContext.render(groupId));
+            consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId.as(runContext, String.class));
         } else if (consumerProps.containsKey(ConsumerConfig.GROUP_ID_CONFIG)) {
             // groupId can be passed from properties
-            this.groupId = consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG);
+            this.groupId = Property.of(consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG));
         }
 
         if (!consumerProps.contains(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)) {
@@ -153,8 +161,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         // by default, enable Avro LogicalType
         serdesProperties.put(KafkaAvroSerializerConfig.AVRO_USE_LOGICAL_TYPE_CONVERTERS_CONFIG, true);
 
-        final Deserializer keyDeserializer = getTypedDeserializer(this.keyDeserializer);
-        final Deserializer valDeserializer = getTypedDeserializer(this.valueDeserializer);
+        final Deserializer keyDeserializer = getTypedDeserializer(this.keyDeserializer.as(runContext, SerdeType.class));
+        final Deserializer valDeserializer = getTypedDeserializer(this.valueDeserializer.as(runContext, SerdeType.class));
 
         keyDeserializer.configure(serdesProperties, true);
         valDeserializer.configure(serdesProperties, false);
@@ -170,7 +178,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             KafkaConsumer<Object, Object> consumer = this.consumer(runContext)
         ) {
             this.subscription = topicSubscription(runContext);
-            this.subscription.subscribe(consumer, this);
+            this.subscription.subscribe(runContext, consumer, this);
 
             Map<String, Integer> count = new HashMap<>();
             AtomicInteger total = new AtomicInteger();
@@ -179,7 +187,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             boolean empty;
 
             do {
-                records = consumer.poll(this.pollDuration);
+                records = consumer.poll(this.pollDuration.as(runContext, Duration.class));
                 empty = records.isEmpty();
 
                 records.forEach(throwConsumer(record -> {
@@ -189,7 +197,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                     count.compute(record.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
                 }));
             }
-            while (!this.ended(empty, total, started));
+            while (!this.ended(runContext, empty, total, started));
 
             if (this.groupId != null) {
                 consumer.commitSync();
@@ -222,16 +230,16 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     }
 
     @SuppressWarnings("RedundantIfStatement")
-    private boolean ended(Boolean empty, AtomicInteger count, ZonedDateTime start) {
+    private boolean ended(RunContext runContext, Boolean empty, AtomicInteger count, ZonedDateTime start) throws IllegalVariableEvaluationException {
         if (empty) {
             return true;
         }
 
-        if (this.maxRecords != null && count.get() > this.maxRecords) {
+        if (this.maxRecords != null && count.get() > this.maxRecords.as(runContext, Integer.class)) {
             return true;
         }
 
-        if (this.maxDuration != null && ZonedDateTime.now().toEpochSecond() > start.plus(this.maxDuration).toEpochSecond()) {
+        if (this.maxDuration != null && ZonedDateTime.now().toEpochSecond() > start.plus(this.maxDuration.as(runContext, Duration.class)).toEpochSecond()) {
             return true;
         }
 
@@ -241,9 +249,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     public ConsumerSubscription topicSubscription(final RunContext runContext) throws IllegalVariableEvaluationException {
         validateConfiguration();
 
-        if (this.topic != null && (partitions != null && !partitions.isEmpty())) {
-            List<TopicPartition> topicPartitions = getTopicPartitions(runContext);
-            return TopicPartitionsSubscription.forTopicPartitions(groupId, topicPartitions, evaluateSince(runContext));
+        if (this.topic != null && (partitions != null && !partitions.asList(runContext, Integer.class).isEmpty())) {
+            List<TopicPartition> topicPartitions = getTopicPartitions(runContext, partitions);
+            return TopicPartitionsSubscription.forTopicPartitions(asString(runContext, groupId), topicPartitions, evaluateSince(runContext));
         }
 
         if (this.topic != null && groupId == null) {
@@ -251,12 +259,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
 
         if (this.topic != null) {
-            return new TopicListSubscription(groupId, evaluateTopics(runContext));
+            return new TopicListSubscription(runContext, asString(runContext, groupId), evaluateTopics(runContext));
         }
 
         if (this.topicPattern != null) {
             try {
-                return new TopicPatternSubscription(groupId, Pattern.compile(this.topicPattern));
+                return new TopicPatternSubscription(runContext, asString(runContext, groupId), Pattern.compile(this.topicPattern.as(runContext , String.class)));
             } catch (PatternSyntaxException e) {
                 throw new IllegalArgumentException("Invalid regex for `topicPattern`: " + this.topicPattern);
             }
@@ -264,10 +272,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         throw new IllegalArgumentException("Failed to create KafkaConsumer subscription");
     }
 
-    private List<TopicPartition> getTopicPartitions(RunContext runContext) throws IllegalVariableEvaluationException {
+    private List<TopicPartition> getTopicPartitions(RunContext runContext, Property<List<Integer>> partitions) throws IllegalVariableEvaluationException {
         List<String> topics = evaluateTopics(runContext);
         return topics.stream()
-            .flatMap(topic -> partitions.stream().map(partition -> new TopicPartition(topic, partition)))
+            .flatMap(throwFunction(topic -> partitions.asList(runContext, Integer.class).stream().map(partition -> new TopicPartition(topic, partition))))
             .toList();
     }
 
@@ -293,7 +301,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Nullable
     private Long evaluateSince(final RunContext runContext) throws IllegalVariableEvaluationException {
         return Optional.ofNullable(this.since)
-            .map(Rethrow.throwFunction(runContext::render))
+            .map(Rethrow.throwFunction(since-> since.as(runContext, String.class)))
             .map(ZonedDateTime::parse)
             .map(ChronoZonedDateTime::toInstant)
             .map(Instant::toEpochMilli)
@@ -352,15 +360,16 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @VisibleForTesting
     interface ConsumerSubscription {
 
-        void subscribe(Consumer<Object, Object> consumer, ConsumeInterface consumeInterface);
+        void subscribe(RunContext runContext, Consumer<Object, Object> consumer, ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException;
 
-        default void waitForSubscription(final Consumer<Object, Object> consumer,
-                                         final ConsumeInterface consumeInterface) {
+        default void waitForSubscription(final RunContext runContext,
+                                         final Consumer<Object, Object> consumer,
+                                         final ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException {
             var timeout = consumeInterface.getMaxDuration() != null ?
                 consumeInterface.getMaxDuration() :
                 consumeInterface.getPollDuration();
             // Wait for the subscription to happen, this avoids possible no result for the first poll due to the poll timeout
-            Await.until(() -> !consumer.subscription().isEmpty(), timeout);
+            Await.until(() -> !consumer.subscription().isEmpty(), timeout.as(runContext, Duration.class));
         }
     }
 
@@ -368,9 +377,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
      * A topic pattern subscription.
      */
     @VisibleForTesting
-    record TopicPatternSubscription(String groupId, Pattern pattern) implements ConsumerSubscription {
+    record TopicPatternSubscription(RunContext runContext, String groupId, Pattern pattern) implements ConsumerSubscription {
         @Override
-        public void subscribe(final Consumer<Object, Object> consumer,
+        public void subscribe(final RunContext runContext,
+                              final Consumer<Object, Object> consumer,
                               final ConsumeInterface consumeInterface) {
             consumer.subscribe(pattern);
         }
@@ -385,12 +395,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
      * A topic list subscription.
      */
     @VisibleForTesting
-    record TopicListSubscription(String groupId, List<String> topics) implements ConsumerSubscription {
+    record TopicListSubscription(RunContext runContext, String groupId, List<String> topics) implements ConsumerSubscription {
 
         @Override
-        public void subscribe(final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
+        public void subscribe(final RunContext runContext, final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException {
             consumer.subscribe(topics);
-            waitForSubscription(consumer, consumeInterface);
+            waitForSubscription(runContext, consumer, consumeInterface);
         }
 
         @Override
@@ -430,7 +440,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         TopicPartitionsSubscription(final String groupId,
                                     final List<TopicPartition> topicPartitions,
                                     final List<String> topics,
-                                    Long fromTimestamp) {
+                                    final Long fromTimestamp) {
             this.groupId = groupId;
             this.topicPartitions = topicPartitions;
             this.topics = topics;
@@ -438,7 +448,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
 
         @Override
-        public void subscribe(final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
+        public void subscribe(final RunContext runContext, final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
             if (this.topicPartitions == null) {
                 this.topicPartitions = allPartitionsForTopics(consumer, topics);
             }
@@ -487,5 +497,14 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         public String toString() {
             return "[Subscription topics=" + topics + ", groupId=" + groupId + "]";
         }
+    }
+
+    @SneakyThrows
+    private String asString(RunContext runContext, Property<String> property) {
+        if (property == null) {
+            return null;
+        }
+
+        return property.as(runContext, String.class);
     }
 }
