@@ -47,7 +47,11 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
             case ARRAY -> buildArrayValue(schema, (Collection<?>) data);
             case ENUM -> buildEnumValue(schema, (String) data);
             case FIXED -> buildFixedValue(schema, (byte[]) data);
-            case STRING, BYTES, INT, LONG, FLOAT, DOUBLE, BOOLEAN, NULL -> data;
+            case INT -> data instanceof Number number ? number.intValue() : data;
+            case LONG -> data instanceof Number number ? number.longValue() : data;
+            case FLOAT -> data instanceof Number number ? number.floatValue() : data;
+            case DOUBLE -> data instanceof Number number ? number.doubleValue() : data;
+            case STRING, BYTES, BOOLEAN, NULL -> data;
         };
     }
 
