@@ -47,10 +47,10 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
             case ARRAY -> buildArrayValue(schema, (Collection<?>) data);
             case ENUM -> buildEnumValue(schema, (String) data);
             case FIXED -> buildFixedValue(schema, (byte[]) data);
-            case INT -> asNumber(data).intValue();
-            case LONG -> asNumber(data).longValue();
-            case FLOAT -> asNumber(data).floatValue();
-            case DOUBLE -> asNumber(data).doubleValue();
+            case INT -> data instanceof Number number ? number.intValue() : data;
+            case LONG -> data instanceof Number number ? number.longValue() : data;
+            case FLOAT -> data instanceof Number number ? number.floatValue() : data;
+            case DOUBLE -> data instanceof Number number ? number.doubleValue() : data;
             case STRING, BYTES, BOOLEAN, NULL -> data;
         };
     }
@@ -88,9 +88,5 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
 
     private static GenericFixed buildFixedValue(Schema schema, byte[] data) {
         return new org.apache.avro.generic.GenericData.Fixed(schema, data);
-    }
-
-    private static Number asNumber(Object data) {
-        return (Number) data;
     }
 }
