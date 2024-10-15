@@ -414,6 +414,72 @@ public class KafkaTest {
     }
 
     @Test
+    void produceAvro_withIntegerAsLong() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("number", 42);
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "number",
+                              "type": "long"
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void produceAvro_withDoubleAsFloat() throws Exception {
+        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Map<String, Object> value = Map.of("number", 42.0d);
+
+        Produce task = Produce.builder()
+                .properties(Map.of("bootstrap.servers", this.bootstrap))
+                .serdeProperties(Map.of("schema.registry.url", this.registry))
+                .keySerializer(SerdeType.STRING)
+                .valueSerializer(SerdeType.AVRO)
+                .topic(topic)
+                .valueAvroSchema("""
+                        {
+                          "type": "record",
+                          "name": "Sample",
+                          "namespace": "io.kestra.examples",
+                          "fields": [
+                            {
+                              "name": "number",
+                              "type": "float"
+                            }
+                          ]
+                        }
+                        """)
+                .from(Map.of("value", value))
+                .build();
+
+        Produce.Output output = task.run(runContext);
+        assertThat(output.getMessagesCount(), is(1));
+    }
+
+    @Test
     void produceAvro_withUnion_andRecord() throws Exception {
         RunContext runContext = runContextFactory.of(ImmutableMap.of());
         String topic = "tu_" + IdUtils.create();
