@@ -1,6 +1,8 @@
 package io.kestra.plugin.kafka;
 
+
 import com.google.common.collect.ImmutableMap;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.serializers.FileSerde;
@@ -83,7 +85,7 @@ public class KafkaTest {
     @SuppressWarnings("unchecked")
     @Test
     void fromAsString() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         File tempFile = File.createTempFile(this.getClass().getSimpleName().toLowerCase() + "_", ".trs");
@@ -112,9 +114,9 @@ public class KafkaTest {
         URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .serdeProperties(Map.of("schema.registry.url", this.registry, "avro.use.logical.type.converters", "true"))
-            .valueAvroSchema(
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry, "avro.use.logical.type.converters", "true")))
+            .valueAvroSchema(Property.of(
                 "{\"type\":\"record\",\"name\":\"twitter_schema\",\"namespace\":\"com.miguno.avro\",\"fields\":[" +
                     "{\"name\":\"username\",\"type\":\"string\"}," +
                     "{\"name\":\"tweet\",\"type\":\"string\"}," +
@@ -125,11 +127,11 @@ public class KafkaTest {
                     "{\"name\":\"offsetDatetimeMillis\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-millis\"}}," +
                     "{\"name\":\"offsetDatetimeMicros\",\"type\":{\"type\":\"long\",\"logicalType\":\"timestamp-micros\"}}," +
                     "{\"name\":\"unionLogical\",\"type\":[{\"type\":\"long\",\"logicalType\":\"timestamp-millis\"},\"null\"]}" +
-                    "]}"
+                    "]}")
             )
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.AVRO)
-            .topic(topic)
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.AVRO))
+            .topic(Property.of(topic))
             .from(uri.toString())
             .build();
 
@@ -137,17 +139,17 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(50));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "auto.offset.reset" , "earliest",
                 "max.poll.records", "15"
-            ))
-            .groupId(IdUtils.create())
+            )))
+            .groupId(Property.of(IdUtils.create()))
             .serdeProperties(task.getSerdeProperties())
             .keyDeserializer(task.getKeySerializer())
             .valueDeserializer(task.getValueSerializer())
-            .pollDuration(Duration.ofSeconds(5))
-            .topic(task.getTopic())
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
+            .topic(topic)
             .build();
 
         Consume.Output consumeOutput = consume.run(runContext);
@@ -173,16 +175,16 @@ public class KafkaTest {
 
     @Test
     void fromAsMapAvro() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Produce task = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .valueAvroSchema(AVRO_SCHEMA_SIMPLE)
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.AVRO)
-            .topic(topic)
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+            .valueAvroSchema(Property.of(AVRO_SCHEMA_SIMPLE))
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.AVRO))
+            .topic(Property.of(topic))
             .from(record())
             .build();
 
@@ -190,15 +192,15 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(1));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "max.poll.records", "15"
-            ))
+            )))
             .serdeProperties(task.getSerdeProperties())
             .keyDeserializer(task.getKeySerializer())
             .valueDeserializer(task.getValueSerializer())
-            .pollDuration(Duration.ofSeconds(5))
-            .topic(task.getTopic())
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
+            .topic(topic)
             .build();
 
         Consume.Output consumeOutput = consume.run(runContext);
@@ -249,15 +251,15 @@ public class KafkaTest {
     @ParameterizedTest
     @MethodSource("sourceAsMap")
     void fromAsMap(SerdeType keySerializer, SerdeType valueSerializer, Map<Object,Object> from) throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Produce task = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .keySerializer(keySerializer)
-            .valueSerializer(valueSerializer)
-            .topic(topic)
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.of(keySerializer))
+            .valueSerializer(Property.of(valueSerializer))
+            .topic(Property.of(topic))
             .from(from)
             .build();
 
@@ -266,14 +268,14 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(1));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "max.poll.records", "15"
-            ))
+            )))
             .serdeProperties(task.getSerdeProperties())
             .keyDeserializer(task.getKeySerializer())
             .valueDeserializer(task.getValueSerializer())
-            .pollDuration(Duration.ofSeconds(5))
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
             .topic(List.of(topic))
             .build();
 
@@ -283,16 +285,16 @@ public class KafkaTest {
 
     @Test
     void fromAsArray() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Produce task = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .valueAvroSchema(AVRO_SCHEMA_SIMPLE)
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.AVRO)
-            .topic(topic)
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+            .valueAvroSchema(Property.of(AVRO_SCHEMA_SIMPLE))
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.AVRO))
+            .topic(Property.of(topic))
             .from(List.of(record(), record()))
             .build();
 
@@ -301,14 +303,14 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(2));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "max.poll.records", "15"
-            ))
+            )))
             .serdeProperties(task.getSerdeProperties())
             .keyDeserializer(task.getKeySerializer())
             .valueDeserializer(task.getValueSerializer())
-            .pollDuration(Duration.ofSeconds(5))
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
             .topic(List.of(topic))
             .build();
 
@@ -318,7 +320,7 @@ public class KafkaTest {
 
     @Test
     void consumeProduce() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
         File tempFile = createRecordFile();
         URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
@@ -328,13 +330,13 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(1));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "max.poll.records", "15"
-            ))
-            .keyDeserializer(SerdeType.STRING)
-            .valueDeserializer(SerdeType.STRING)
-            .pollDuration(Duration.ofSeconds(5))
+            )))
+            .keyDeserializer(Property.of(SerdeType.STRING))
+            .valueDeserializer(Property.of(SerdeType.STRING))
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
             .topic(List.of(topic))
             .build();
         Consume.Output consumeOutput = consume.run(runContext);
@@ -347,14 +349,14 @@ public class KafkaTest {
 
     @Test
     void invalidBrokers() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         TimeoutException e = assertThrows(TimeoutException.class, () -> {
             Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", "localhost:1234", "max.block.ms", "1000"))
-                .transactional(false) // if transactional the exception would be 'java.lang.IllegalStateException: Cannot attempt operation `commitTransaction` because the previous call to `initTransactions` timed out and must be retried'
-                .topic(topic)
+                .properties(Property.of(Map.of("bootstrap.servers", "localhost:1234", "max.block.ms", "1000")))
+                .transactional(Property.of(false)) // if transactional the exception would be 'java.lang.IllegalStateException: Cannot attempt operation `commitTransaction` because the previous call to `initTransactions` timed out and must be retried'
+                .topic(Property.of(topic))
                 .from(List.of(record(), record()))
                 .build();
 
@@ -365,7 +367,7 @@ public class KafkaTest {
 
         e = assertThrows(TimeoutException.class, () -> {
             Consume task = Consume.builder()
-                .properties(Map.of("bootstrap.servers", "localhost:1234", "default.api.timeout.ms", "1000"))
+                .properties(Property.of(Map.of("bootstrap.servers", "localhost:1234", "default.api.timeout.ms", "1000")))
                 .topic(topic)
                 .build();
 
@@ -375,12 +377,12 @@ public class KafkaTest {
 
         SerializationException ex = assertThrows(SerializationException.class, () -> {
             Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", "http://localhost:1234"))
-                .valueAvroSchema(AVRO_SCHEMA_SIMPLE)
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", "http://localhost:1234")))
+                .valueAvroSchema(Property.of(AVRO_SCHEMA_SIMPLE))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
                 .from(record())
                 .build();
 
@@ -392,7 +394,7 @@ public class KafkaTest {
 
     @Test
     void produceComplexAvro() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         HashMap<String, Object> map = new HashMap<>();
@@ -401,12 +403,12 @@ public class KafkaTest {
         map.put("stat", Map.of("followers_count", 10L));
         
         Produce reproduce = Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .serdeProperties(Map.of("schema.registry.url", this.registry))
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.AVRO)
-            .topic(topic)
-            .valueAvroSchema(AVRO_SCHEMA_COMPLEX)
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.AVRO))
+            .topic(Property.of(topic))
+            .valueAvroSchema(Property.of(AVRO_SCHEMA_COMPLEX))
             .from(Map.of("value", map))
             .build();
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
@@ -415,18 +417,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withIntegerAsLong() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("number", 42);
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -438,7 +440,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -448,18 +450,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withDoubleAsFloat() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("number", 42.0d);
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -471,7 +473,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -481,18 +483,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withUnion_andRecord() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("product", Map.of("id", "v1"));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -507,7 +509,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -518,19 +520,19 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withUnion_andRecord_null() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("product", null);
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -545,7 +547,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -555,18 +557,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withRecord() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("address", Map.of("city", "Paris", "country", "FR", "longitude", 2.3522, "latitude", 48.8566));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -587,7 +589,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -597,18 +599,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withMap() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("map", Map.of("foo", 42, "bar", 17));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -620,7 +622,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -630,18 +632,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withMap_andRecord() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("map", Map.of("foo", Map.of("id", "v1"), "bar", Map.of("id", "v2")));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -653,7 +655,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -663,18 +665,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withArray() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("array", List.of("foo", "bar"));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -686,7 +688,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -696,18 +698,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withArray_andRecord() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("array", List.of(Map.of("id", "v1"), Map.of("id", "v2")));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -719,7 +721,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -729,18 +731,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withEnum() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("state", "SUCCESS");
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -752,7 +754,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -762,18 +764,18 @@ public class KafkaTest {
 
     @Test
     void produceAvro_withFixed() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
         Map<String, Object> value = Map.of("base64", Base64.getEncoder().encode("Hello, World!".getBytes(UTF_8)));
 
         Produce task = Produce.builder()
-                .properties(Map.of("bootstrap.servers", this.bootstrap))
-                .serdeProperties(Map.of("schema.registry.url", this.registry))
-                .keySerializer(SerdeType.STRING)
-                .valueSerializer(SerdeType.AVRO)
-                .topic(topic)
-                .valueAvroSchema("""
+                .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+                .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+                .keySerializer(Property.of(SerdeType.STRING))
+                .valueSerializer(Property.of(SerdeType.AVRO))
+                .topic(Property.of(topic))
+                .valueAvroSchema(Property.of("""
                         {
                           "type": "record",
                           "name": "Sample",
@@ -785,7 +787,7 @@ public class KafkaTest {
                             }
                           ]
                         }
-                        """)
+                        """))
                 .from(Map.of("value", value))
                 .build();
 
@@ -795,7 +797,7 @@ public class KafkaTest {
 
     @Test
     void shouldConsumeGivenTopicPattern() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
         File tempFile = createRecordFile();
         URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
@@ -805,17 +807,17 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(1));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "max.poll.records", "15",
                 "auto.offset.reset", "earliest",
                 "metadata.max.age.ms", "100"
-            ))
-            .keyDeserializer(SerdeType.STRING)
-            .valueDeserializer(SerdeType.STRING)
-            .pollDuration(Duration.ofSeconds(5))
-            .topicPattern(topic.substring(0, 6) + ".*")
-            .groupId(IdUtils.create())
+            )))
+            .keyDeserializer(Property.of(SerdeType.STRING))
+            .valueDeserializer(Property.of(SerdeType.STRING))
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
+            .topicPattern(Property.of(topic.substring(0, 6) + ".*"))
+            .groupId(Property.of(IdUtils.create()))
             .build();
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(1));
@@ -827,7 +829,7 @@ public class KafkaTest {
 
     @Test
     void shouldConsumeGivenTopicPartition() throws Exception {
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
         File tempFile = createRecordFile();
         URI uri = storageInterface.put(null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
@@ -837,19 +839,20 @@ public class KafkaTest {
         assertThat(runOutput.getMessagesCount(), is(1));
 
         Consume consume = Consume.builder()
-            .properties(Map.of(
+            .properties(Property.of(Map.of(
                 "bootstrap.servers", this.bootstrap,
                 "max.poll.records", "15",
                 "auto.offset.reset", "earliest",
                 "metadata.max.age.ms", "100"
-            ))
-            .keyDeserializer(SerdeType.STRING)
-            .valueDeserializer(SerdeType.STRING)
-            .pollDuration(Duration.ofSeconds(5))
+            )))
+            .keyDeserializer(Property.of(SerdeType.STRING))
+            .valueDeserializer(Property.of(SerdeType.STRING))
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
             .topic(topic)
-            .partitions(List.of(0))
-            .groupId(IdUtils.create())
+            .partitions(Property.of(List.of(0)))
+            .groupId(Property.of(IdUtils.create()))
             .build();
+
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(1));
 
@@ -886,10 +889,10 @@ public class KafkaTest {
 
     private Produce createProduceTask(final String topic, final URI uri) {
         return Produce.builder()
-            .properties(Map.of("bootstrap.servers", this.bootstrap))
-            .keySerializer(SerdeType.STRING)
-            .valueSerializer(SerdeType.STRING)
-            .topic(topic)
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.STRING))
+            .topic(Property.of(topic))
             .from(uri.toString())
             .build();
     }

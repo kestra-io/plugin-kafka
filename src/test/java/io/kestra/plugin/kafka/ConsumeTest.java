@@ -1,7 +1,8 @@
 package io.kestra.plugin.kafka;
 
-import com.google.common.collect.ImmutableMap;
+
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.junit.annotations.KestraTest;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -32,7 +34,7 @@ class ConsumeTest {
     @Test
     void shouldThrowIllegalGivenNoTopicAnNoPattern() {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume.builder().build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -41,11 +43,11 @@ class ConsumeTest {
     @Test
     void shouldThrowIllegalGivenBothTopicAnNoPattern() {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
             .topic("topic")
-            .topicPattern(".*")
+            .topicPattern(Property.of(".*"))
             .build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -54,10 +56,10 @@ class ConsumeTest {
     @Test
     void shouldThrowIllegalGivenPatternAndNoGroupId() {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .topicPattern(".*")
+            .topicPattern(Property.of(".*"))
             .build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -66,7 +68,7 @@ class ConsumeTest {
     @Test
     void shouldGetTopicPartitionSubscriptionGivenTopicAndNoGroupId() throws IllegalVariableEvaluationException {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
             .topic("topic")
@@ -74,29 +76,29 @@ class ConsumeTest {
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
-        subscription.subscribe(new MockConsumer<>(OffsetResetStrategy.EARLIEST), task);
+        subscription.subscribe(runContext, new MockConsumer<>(OffsetResetStrategy.EARLIEST), task);
 
         // Then
-        Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
+        Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
         Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
     }
 
     @Test
     void shouldGetTopicPartitionSubscriptionWithTimestamp() throws IllegalVariableEvaluationException {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Instant now = Instant.now();
         Consume task = Consume
             .builder()
             .topic("topic")
-            .since(now.toString())
+            .since(Property.of(now.toString()))
             .build();
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
 
         // Then
-        Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
+        Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
         Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
         Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription) subscription).fromTimestamp());
     }
@@ -104,20 +106,20 @@ class ConsumeTest {
     @Test
     void shouldGetTopicPartitionSubscriptionGivenPartition() throws IllegalVariableEvaluationException {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Instant now = Instant.now();
         Consume task = Consume
             .builder()
             .topic("topic")
-            .partitions(List.of(0))
-            .since(now.toString())
+            .partitions(Property.of(List.of(0)))
+            .since(Property.of(now.toString()))
             .build();
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
 
         // Then
-        Assertions.assertTrue(subscription instanceof Consume.TopicPartitionsSubscription);
+        Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
         Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
         Assertions.assertEquals(List.of(new TopicPartition("topic", 0)), ((Consume.TopicPartitionsSubscription) subscription).topicPartitions());
         Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription) subscription).fromTimestamp());
@@ -126,10 +128,10 @@ class ConsumeTest {
     @Test
     void shouldGetTopicListSubscriptionGivenTopicAndGroupId() throws IllegalVariableEvaluationException {
         // Given
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .groupId("groupId")
+            .groupId(Property.of("groupId"))
             .topic("topic")
             .build();
 
@@ -137,8 +139,8 @@ class ConsumeTest {
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
 
         // Then
-        Assertions.assertDoesNotThrow(() -> subscription.subscribe(new MockConsumer<>(OffsetResetStrategy.EARLIEST), task));
-        Assertions.assertTrue(subscription instanceof Consume.TopicListSubscription);
+        Assertions.assertDoesNotThrow(() -> subscription.subscribe(runContext, new MockConsumer<>(OffsetResetStrategy.EARLIEST), task));
+        Assertions.assertInstanceOf(Consume.TopicListSubscription.class, subscription);
         Assertions.assertEquals(List.of("topic"), ((Consume.TopicListSubscription) subscription).topics());
     }
 
@@ -148,19 +150,19 @@ class ConsumeTest {
         MockConsumer<Object, Object> consumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
         consumer.updatePartitions("topic", List.of(new PartitionInfo("topic", 0, null, null, null)));
 
-        RunContext runContext = runContextFactory.of(ImmutableMap.of());
+        RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .groupId("groupId")
-            .topicPattern(".*")
+            .groupId(Property.of("groupId"))
+            .topicPattern(Property.of(".*"))
             .build();
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
 
         // Then
-        Assertions.assertDoesNotThrow(() -> subscription.subscribe(consumer, task));
-        Assertions.assertTrue(subscription instanceof Consume.TopicPatternSubscription);
+        Assertions.assertDoesNotThrow(() -> subscription.subscribe(runContext, consumer, task));
+        Assertions.assertInstanceOf(Consume.TopicPatternSubscription.class, subscription);
         Assertions.assertEquals(".*", ((Consume.TopicPatternSubscription) subscription).pattern().pattern());
     }
 

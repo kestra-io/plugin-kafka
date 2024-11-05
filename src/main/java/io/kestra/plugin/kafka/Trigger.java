@@ -4,8 +4,7 @@ import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.executions.ExecutionTrigger;
-import io.kestra.core.models.flows.State;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.*;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.SerdeType;
@@ -16,10 +15,7 @@ import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 
 @SuperBuilder
 @ToString
@@ -64,34 +60,34 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     @Builder.Default
     private final Duration interval = Duration.ofSeconds(60);
 
-    private Map<String, String> properties;
+    private Property<Map<String, String>> properties;
 
     @Builder.Default
-    private Map<String, String> serdeProperties = Collections.emptyMap();
+    private Property<Map<String, String>> serdeProperties = Property.of(new HashMap<>());
 
     private Object topic;
 
-    private List<Integer> partitions;
+    private Property<List<Integer>> partitions;
 
-    private String topicPattern;
+    private Property<String> topicPattern;
 
     @NotNull
-    private String groupId;
+    private Property<String> groupId;
 
     @Builder.Default
-    private SerdeType keyDeserializer = SerdeType.STRING;
+    private Property<SerdeType> keyDeserializer = Property.of(SerdeType.STRING);
 
     @Builder.Default
-    private SerdeType valueDeserializer = SerdeType.STRING;
+    private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
 
-    private String since;
+    private Property<String> since;
 
     @Builder.Default
-    private Duration pollDuration = Duration.ofSeconds(5);
+    private Property<Duration> pollDuration = Property.of(Duration.ofSeconds(5));
 
-    private Integer maxRecords;
+    private Property<Integer> maxRecords;
 
-    private Duration maxDuration;
+    private Property<Duration> maxDuration;
 
     @Override
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
