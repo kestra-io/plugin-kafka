@@ -4,6 +4,7 @@ import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.models.triggers.RealtimeTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
@@ -23,10 +24,7 @@ import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -69,27 +67,27 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 )
 public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, KafkaConsumerInterface {
-    private Map<String, String> properties;
+    private Property<Map<String, String>> properties;
 
     @Builder.Default
-    private Map<String, String> serdeProperties = Collections.emptyMap();
+    private Property<Map<String, String>> serdeProperties = Property.of(new HashMap<>());
 
     private Object topic;
 
-    private List<Integer> partitions;
+    private Property<List<Integer>> partitions;
 
-    private String topicPattern;
+    private Property<String> topicPattern;
 
     @NotNull
-    private String groupId;
+    private Property<String> groupId;
 
     @Builder.Default
-    private SerdeType keyDeserializer = SerdeType.STRING;
+    private Property<SerdeType> keyDeserializer = Property.of(SerdeType.STRING);
 
     @Builder.Default
-    private SerdeType valueDeserializer = SerdeType.STRING;
+    private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
 
-    private String since;
+    private Property<String> since;
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -130,7 +128,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         return Flux.create(fluxSink -> {
             try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
                 this.consumer.set(consumer);
-                task.topicSubscription(runContext).subscribe(consumer, task);
+                task.topicSubscription(runContext).subscribe(runContext, consumer, task);
                 while (isActive.get()) {
                     try {
                         consumer.poll(Duration.ofMillis(Long.MAX_VALUE)).forEach(fluxSink::next);

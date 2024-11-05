@@ -6,13 +6,13 @@ import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import jakarta.annotation.Nullable;
-import java.util.Optional;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -110,8 +110,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         title = "Kafka topic to which the message should be sent.",
         description = "Could also be passed inside the `from` property using the key `topic`."
     )
-    @PluginProperty(dynamic = true)
-    private String topic;
+    private Property<String> topic;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "The content of the message to be sent to Kafka.",
@@ -128,37 +127,32 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
-    @PluginProperty(dynamic = true)
     @Builder.Default
-    private SerdeType keySerializer = SerdeType.STRING;
+    private Property<SerdeType> keySerializer = Property.of(SerdeType.STRING);
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "The serializer used for the value.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
-    @PluginProperty(dynamic = true)
     @Builder.Default
-    private SerdeType valueSerializer = SerdeType.STRING;
+    private Property<SerdeType> valueSerializer = Property.of(SerdeType.STRING);
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Avro Schema if the key is set to `AVRO` type."
     )
-    @PluginProperty(dynamic = true)
-    private String keyAvroSchema;
+    private Property<String> keyAvroSchema;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Avro Schema if the value is set to `AVRO` type."
     )
-    @PluginProperty(dynamic = true)
-    private String valueAvroSchema;
+    private Property<String> valueAvroSchema;
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Whether the producer should be transactional."
     )
     @Builder.Default
-    @PluginProperty
-    private boolean transactional = true;
+    private Property<Boolean> transactional = Property.of(true);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -170,6 +164,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
+        final boolean transactional = runContext.render(this.transactional).as(Boolean.class).orElse(true);
 
         Properties properties = createProperties(this.properties, runContext);
         if (transactional) {
@@ -178,8 +173,10 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
 
-        Serializer keySerial = getTypedSerializer(this.keySerializer, parseAvroSchema(runContext, keyAvroSchema));
-        Serializer valSerial = getTypedSerializer(this.valueSerializer, parseAvroSchema(runContext, valueAvroSchema));
+        Serializer keySerial = getTypedSerializer(runContext.render(this.keySerializer).as(SerdeType.class).orElse(SerdeType.STRING),
+            parseAvroSchema(runContext, keyAvroSchema));
+        Serializer valSerial = getTypedSerializer(runContext.render(this.valueSerializer).as(SerdeType.class).orElse(SerdeType.STRING),
+            parseAvroSchema(runContext, valueAvroSchema));
 
         keySerial.configure(serdesProperties, true);
         valSerial.configure(serdesProperties, false);
@@ -236,8 +233,10 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     }
 
     @Nullable
-    private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable String avroSchema) throws IllegalVariableEvaluationException {
-        return Optional.ofNullable(avroSchema).map(throwFunction(runContext::render)).map(AvroSchema::new).orElse(null);
+    private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable Property<String> avroSchema) throws IllegalVariableEvaluationException {
+        return runContext.render(avroSchema).as(String.class)
+            .map(AvroSchema::new)
+            .orElse(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -263,7 +262,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         if (map.containsKey("topic")) {
             topic = runContext.render((String) map.get("topic"));
         } else {
-            topic = runContext.render(this.topic);
+            topic = runContext.render(this.topic).as(String.class).orElse(null);
         }
 
         // just to test that connection to brokers works
@@ -273,7 +272,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         }
 
         return new ProducerRecord<>(
-            runContext.render(topic),
+            topic,
             (Integer) map.get("partition"),
             this.processTimestamp(map.get("timestamp")),
             key,
@@ -287,27 +286,27 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             return null;
         }
 
-        if (timestamp instanceof Long) {
-            return (Long) timestamp;
+        if (timestamp instanceof Long t) {
+            return t;
         }
 
-        if (timestamp instanceof ZonedDateTime) {
-            return ((ZonedDateTime) timestamp).toInstant().toEpochMilli();
+        if (timestamp instanceof ZonedDateTime dateTime) {
+            return dateTime.toInstant().toEpochMilli();
         }
 
-        if (timestamp instanceof Instant) {
-            return ((Instant) timestamp).toEpochMilli();
+        if (timestamp instanceof Instant instant) {
+            return instant.toEpochMilli();
         }
 
-        if (timestamp instanceof LocalDateTime) {
-            return ((LocalDateTime) timestamp).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        if (timestamp instanceof LocalDateTime dateTime) {
+            return dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
         }
 
-        if (timestamp instanceof String) {
+        if (timestamp instanceof String t) {
             try {
-                return ZonedDateTime.parse((String) timestamp).toInstant().toEpochMilli();
+                return ZonedDateTime.parse(t).toInstant().toEpochMilli();
             } catch (Exception ignored) {
-                return Instant.parse((String) timestamp).toEpochMilli();
+                return Instant.parse(t).toEpochMilli();
             }
         }
 
