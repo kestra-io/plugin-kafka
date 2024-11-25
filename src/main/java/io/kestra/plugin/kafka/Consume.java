@@ -191,19 +191,21 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             }
             while (!this.ended(runContext, empty, total, started));
 
+            // Flush, and write data to Kestra's internal storage
+            output.flush();
+            URI uri = runContext.storage().putFile(tempFile);
+
+            // Important - always commit the consumer offsets after
+            // records are fully written to Kestra's internal storage
             if (this.groupId != null) {
                 consumer.commitSync();
             }
 
-            // flush & close
-            output.flush();
-
-            count
-                .forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
+            count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
 
             return Output.builder()
                 .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
-                .uri(runContext.storage().putFile(tempFile))
+                .uri(uri)
                 .build();
         }
     }
