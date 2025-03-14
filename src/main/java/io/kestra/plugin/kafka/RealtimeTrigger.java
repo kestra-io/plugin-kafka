@@ -41,8 +41,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @Plugin(
     examples = {
         @Example(
-            title = "Consume a message from a Kafka topic in real time.",
             full = true,
+            title = "Consume a message from a Kafka topic in real time.",
             code = """
                 id: kafka_realtime_trigger
                 namespace: company.team
@@ -63,6 +63,39 @@ import java.util.concurrent.atomic.AtomicReference;
                       keyDeserializer: STRING
                       valueDeserializer: AVRO
                     groupId: kafkaConsumerGroupId"""
+        ),
+        @Example(
+            full = true,
+            title = "Use Kafka Realtime Trigger to push events into MongoDB",
+            code = """
+                id: kafka_realtime_trigger
+                namespace: company.team
+                
+                tasks:
+                  - id: insert_into_mongodb
+                    type: io.kestra.plugin.mongodb.InsertOne
+                    connection:
+                      uri: mongodb://mongoadmin:secret@localhost:27017/?authSource=admin
+                    database: kestra
+                    collection: products
+                    document: |
+                      {
+                        "product_id": "{{ trigger.value | jq('.product_id') | first }}",
+                        "product_name": "{{ trigger.value | jq('.product_name') | first }}",
+                        "category": "{{ trigger.value | jq('.product_category') | first }}",
+                        "brand": "{{ trigger.value | jq('.brand') | first }}"
+                      }
+                
+                triggers:
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: products
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    serdeProperties:
+                      valueDeserializer: JSON
+                    groupId: kestraConsumer
+            """
         )
     }
 )
