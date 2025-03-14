@@ -54,6 +54,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
     examples = {
         @Example(
             full = true,
+            title = "Consome data from a Kafka topic",
             code = """
                 id: kafka_consume
                 namespace: company.team
@@ -71,8 +72,8 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                 """
         ),
         @Example(
-            title = "Connect to a Kafka cluster with SSL.",
             full = true,
+            title = "Connect to a Kafka cluster with SSL.",
             code = """
                 id: kafka_consume
                 namespace: company.team
@@ -94,6 +95,31 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                     keyDeserializer: STRING
                     valueDeserializer: STRING
                 """
+        ),
+        @Example(
+            full = true,
+            title = "Consume data from a Kafka topic and write it to a JSON file",
+            code = """
+                id: consume-kafka-messages
+                namespace: company.team
+                
+                tasks:
+                  - id: consume
+                    type: io.kestra.plugin.kafka.Consume
+                    topic: topic_test
+                    properties:
+                      bootstrap.servers: localhost:9093
+                      auto.offset.reset: earliest
+                    pollDuration: PT20S
+                    maxRecords: 50
+                    keyDeserializer: STRING
+                    valueDeserializer: JSON
+                
+                  - id: write_json
+                    type: io.kestra.plugin.serdes.json.IonToJson
+                    newLine: true
+                    from: "{{ outputs.consume.uri }}"
+            """
         )
     }
 )
