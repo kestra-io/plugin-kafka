@@ -80,6 +80,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
 
+    private OnSerdeError onSerdeError;
+
     private Property<String> since;
 
     @Builder.Default
@@ -105,6 +107,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .groupId(this.groupId)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
+            .onSerdeError(this.onSerdeError)
             .since(this.since)
             .pollDuration(this.pollDuration)
             .maxRecords(this.maxRecords)

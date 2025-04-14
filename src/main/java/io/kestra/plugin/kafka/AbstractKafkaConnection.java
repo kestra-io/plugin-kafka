@@ -16,10 +16,12 @@ import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.common.config.SslConfigs;
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.serialization.*;
 
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 
@@ -34,6 +36,9 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
 
     @Builder.Default
     protected Property<Map<String, String>> serdeProperties = Property.of(new HashMap<>());
+
+    @Getter(AccessLevel.NONE)
+    protected AtomicReference<Object> dataOnSerdeError = new AtomicReference<>();
 
     protected static Properties createProperties(Property<Map<String, String>> mapProperties, RunContext runContext) throws Exception {
         Properties properties = new Properties();
@@ -83,7 +88,26 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
             case UUID -> new UUIDDeserializer();
             case VOID -> new VoidDeserializer();
             case AVRO -> new GenericRecordToMapDeserializer(new KafkaAvroDeserializer());
-            case JSON -> new KafkaJsonDeserializer<>();
+            case JSON -> new KafkaJsonDeserializer<>() {
+                @Override
+                public Object deserialize(String ignored, byte[] bytes) {
+                    try {
+                        return super.deserialize(ignored, bytes);
+                    }  catch (SerializationException e) {
+                        throw new PluginKafkaSerdeException(e, new String(bytes));
+                    }
+                }
+            };
         };
+    }
+
+    @Getter
+    protected static class PluginKafkaSerdeException extends SerializationException {
+        private final String data;
+
+        public PluginKafkaSerdeException(SerializationException e, String data) {
+            super(e);
+            this.data = data;
+        }
     }
 }

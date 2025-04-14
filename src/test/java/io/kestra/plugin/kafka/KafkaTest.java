@@ -401,7 +401,7 @@ public class KafkaTest {
         map.put("username", "loic");
         map.put("tweet", "Something clever");
         map.put("stat", Map.of("followers_count", 10L));
-        
+
         Produce reproduce = Produce.builder()
             .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
             .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
@@ -860,6 +860,44 @@ public class KafkaTest {
         Produce reproduce = createProduceTask(topic, consumeOutput.getUri());
         Produce.Output reproduceRunOutput = reproduce.run(runContext);
         assertThat(reproduceRunOutput.getMessagesCount(), is(1));
+    }
+
+    @Test
+    void onSerdeError_shouldSkip() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String topic = "tu_" + IdUtils.create();
+
+        Produce task = Produce.builder()
+            .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.of(Map.of("schema.registry.url", this.registry)))
+            .valueAvroSchema(Property.of(AVRO_SCHEMA_SIMPLE))
+            .keySerializer(Property.of(SerdeType.STRING))
+            .valueSerializer(Property.of(SerdeType.AVRO))
+            .topic(Property.of(topic))
+            .from(record())
+            .build();
+
+        Produce.Output runOutput = task.run(runContext);
+        assertThat(runOutput.getMessagesCount(), is(1));
+
+        Consume consume = Consume.builder()
+            .properties(Property.of(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "max.poll.records", "15"
+            )))
+            .serdeProperties(task.getSerdeProperties())
+            .keyDeserializer(task.getKeySerializer())
+            .valueDeserializer(Property.of(SerdeType.JSON))
+            .pollDuration(Property.of(Duration.ofSeconds(5)))
+            .onSerdeError(KafkaConsumerInterface.OnSerdeError.builder()
+                .type(Property.of((KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED)))
+                .build()
+            )
+            .topic(topic)
+            .build();
+
+        Consume.Output consumeOutput = consume.run(runContext);
+        assertThat(consumeOutput.getMessagesCount(), nullValue());
     }
 
     private static void assertOutputFile(RunContext runContext, Consume.Output consumeOutput) throws IOException {

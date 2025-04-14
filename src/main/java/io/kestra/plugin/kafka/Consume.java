@@ -18,7 +18,9 @@ import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.IsolationLevel;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.jetbrains.annotations.Nullable;
@@ -28,6 +30,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -102,7 +105,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
             code = """
                 id: consume-kafka-messages
                 namespace: company.team
-                
+
                 tasks:
                   - id: consume
                     type: io.kestra.plugin.kafka.Consume
@@ -114,7 +117,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                     maxRecords: 50
                     keyDeserializer: STRING
                     valueDeserializer: JSON
-                
+
                   - id: write_json
                     type: io.kestra.plugin.serdes.json.IonToJson
                     newLine: true
@@ -137,6 +140,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
+
+    private OnSerdeError onSerdeError;
 
     private Property<String> since;
 
@@ -233,7 +238,40 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
                 .uri(uri)
                 .build();
+        } catch (KafkaException e) {
+            if (onSerdeError == null || !(e.getCause() instanceof PluginKafkaSerdeException)) {
+                throw e;
+            }
+
+            PluginKafkaSerdeException err = (PluginKafkaSerdeException) e.getCause();
+            OnSerdeErrorBehavior onSerdeErrorBehavior = runContext.render(this.onSerdeError.getType()).as(OnSerdeErrorBehavior.class).orElseThrow();
+            runContext.logger().warn("Skipping consume on serde error: '{}'", e.getMessage());
+
+            switch (onSerdeErrorBehavior) {
+                case SKIPPED -> {
+                    return Output.builder().build();
+                }
+                case STORE -> {
+                    Files.writeString(tempFile.toPath(), err.getData(), StandardCharsets.UTF_8);
+                    return Output.builder()
+                        .uri(runContext.storage().putFile(tempFile))
+                        .build();
+                }
+                case DLQ -> {
+                    Produce.builder()
+                        .topic(onSerdeError.getTopic())
+                        .properties(this.getProperties())
+                        .serdeProperties(this.getSerdeProperties())
+                        .keySerializer(this.getKeyDeserializer())
+                        .valueSerializer(this.getValueDeserializer())
+                        .from(err.getData())
+                        .build()
+                        .run(runContext);
+                    return Output.builder().build();
+                }
+            }
         }
+        return null;
     }
 
     public Message recordToMessage(ConsumerRecord<Object, Object> consumerRecord) {
@@ -489,9 +527,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
             consumer
                 .offsetsForTimes(topicPartitionsTimestamp)
-                .forEach((tp, offsetAndTimestamp) -> {
-                    consumer.seek(tp, offsetAndTimestamp.timestamp());
-                });
+                .forEach((tp, offsetAndTimestamp) ->
+                    consumer.seek(tp, offsetAndTimestamp.timestamp())
+                );
         }
 
         @VisibleForTesting
