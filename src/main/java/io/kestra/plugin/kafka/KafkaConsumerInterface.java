@@ -1,9 +1,12 @@
 package io.kestra.plugin.kafka;
 
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import lombok.Builder;
+import lombok.Getter;
 
 import java.util.List;
 
@@ -55,4 +58,32 @@ public interface KafkaConsumerInterface {
     )
     Property<String> getSince();
 
+    @Schema(
+        title = "On serde error.",
+        description = """
+    Set the behavior wanted when valueDeserializer is JSON and a serde error has occurred :
+        - SKIPPED : all invalid messages will be skipped
+        - STORE : messages will be ignored and stored as a file
+        - DLQ : messages will be ignored and sent to the DLQ specified in `topic`
+    """
+    )
+    @PluginProperty
+    OnSerdeError getOnSerdeError();
+
+    @Builder
+    @Getter
+    class OnSerdeError {
+
+        @Schema(title = "Behavior in case of serde error.")
+        @NotNull
+        @Builder.Default
+        Property<OnSerdeErrorBehavior> type = Property.of(OnSerdeErrorBehavior.SKIPPED);
+
+        @Schema(title = "Topic used when DLQ has been chosen.")
+        Property<String> topic;
+    }
+
+    enum OnSerdeErrorBehavior {
+        SKIPPED, DLQ, STORE
+    }
 }

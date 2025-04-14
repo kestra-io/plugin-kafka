@@ -70,7 +70,7 @@ import java.util.concurrent.atomic.AtomicReference;
             code = """
                 id: kafka_realtime_trigger
                 namespace: company.team
-                
+
                 tasks:
                   - id: insert_into_mongodb
                     type: io.kestra.plugin.mongodb.InsertOne
@@ -85,7 +85,7 @@ import java.util.concurrent.atomic.AtomicReference;
                         "category": "{{ trigger.value | jq('.product_category') | first }}",
                         "brand": "{{ trigger.value | jq('.brand') | first }}"
                       }
-                
+
                 triggers:
                   - id: realtime_trigger
                     type: io.kestra.plugin.kafka.RealtimeTrigger
@@ -120,6 +120,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
 
+    private OnSerdeError onSerdeError;
+
     private Property<String> since;
 
     @Builder.Default
@@ -149,6 +151,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .groupId(this.groupId)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
+            .onSerdeError(this.onSerdeError)
             .since(this.since)
             .build();
 
