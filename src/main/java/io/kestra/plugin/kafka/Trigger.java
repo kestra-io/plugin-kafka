@@ -23,7 +23,7 @@ import java.util.*;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages periodically from Kafka topics and create one execution per batch.",
+    title = "Trigger a flow on message consumption periodically from Kafka topics.",
     description = "Note that you don't need an extra task to consume the message from the event trigger. The trigger will automatically consume messages and you can retrieve their content in your flow using the `{{ trigger.uri }}` variable. If you would like to consume each message from a Kafka topic in real-time and create one execution per message, you can use the [io.kestra.plugin.kafka.RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) instead."
 )
 @Plugin(
