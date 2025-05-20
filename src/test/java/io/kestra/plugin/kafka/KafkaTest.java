@@ -7,6 +7,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.storages.StorageInterface;
+import io.kestra.core.tenant.TenantService;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
@@ -111,7 +112,7 @@ public class KafkaTest {
             );
         }
 
-        URI uri = storageInterface.put(null, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+        URI uri = storageInterface.put(TenantService.MAIN_TENANT, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = Produce.builder()
             .properties(Property.of(Map.of("bootstrap.servers", this.bootstrap)))
@@ -323,7 +324,7 @@ public class KafkaTest {
         RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
         File tempFile = createRecordFile();
-        URI uri = storageInterface.put(null, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+        URI uri = storageInterface.put(TenantService.MAIN_TENANT, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = createProduceTask(topic, uri);
         Produce.Output runOutput = task.run(runContext);
@@ -800,7 +801,7 @@ public class KafkaTest {
         RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
         File tempFile = createRecordFile();
-        URI uri = storageInterface.put(null, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+        URI uri = storageInterface.put(TenantService.MAIN_TENANT, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = createProduceTask(topic, uri);
         Produce.Output runOutput = task.run(runContext);
@@ -832,7 +833,7 @@ public class KafkaTest {
         RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
         File tempFile = createRecordFile();
-        URI uri = storageInterface.put(null, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
+        URI uri = storageInterface.put(TenantService.MAIN_TENANT, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
 
         Produce task = createProduceTask(topic, uri);
         Produce.Output runOutput = task.run(runContext);
