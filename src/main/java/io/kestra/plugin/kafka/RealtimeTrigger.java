@@ -95,7 +95,7 @@ import java.util.concurrent.atomic.AtomicReference;
                     serdeProperties:
                       valueDeserializer: JSON
                     groupId: kestraConsumer
-            """
+                """
         )
     }
 )
