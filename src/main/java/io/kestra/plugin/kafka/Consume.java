@@ -122,7 +122,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                     type: io.kestra.plugin.serdes.json.IonToJson
                     newLine: true
                     from: "{{ outputs.consume.uri }}"
-            """
+                """
         )
     }
 )
