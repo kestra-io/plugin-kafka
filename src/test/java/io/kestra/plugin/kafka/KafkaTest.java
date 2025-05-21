@@ -156,7 +156,7 @@ public class KafkaTest {
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(50));
 
-        BufferedReader inputStream = new BufferedReader(new InputStreamReader(storageInterface.get(null, null, consumeOutput.getUri())));
+        BufferedReader inputStream = new BufferedReader(new InputStreamReader(storageInterface.get(TenantService.MAIN_TENANT, null, consumeOutput.getUri())));
         List<Map<String, Object>> result = new ArrayList<>();
         FileSerde.reader(inputStream, r -> result.add((Map<String, Object>) r));
 
