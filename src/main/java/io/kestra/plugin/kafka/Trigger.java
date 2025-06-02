@@ -63,7 +63,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     private Property<Map<String, String>> properties;
 
     @Builder.Default
-    private Property<Map<String, String>> serdeProperties = Property.of(new HashMap<>());
+    private Property<Map<String, String>> serdeProperties = Property.ofValue(new HashMap<>());
 
     private Object topic;
 
@@ -75,17 +75,17 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     private Property<String> groupId;
 
     @Builder.Default
-    private Property<SerdeType> keyDeserializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> keyDeserializer = Property.ofValue(SerdeType.STRING);
 
     @Builder.Default
-    private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
     private OnSerdeError onSerdeError;
 
     private Property<String> since;
 
     @Builder.Default
-    private Property<Duration> pollDuration = Property.of(Duration.ofSeconds(5));
+    private Property<Duration> pollDuration = Property.ofValue(Duration.ofSeconds(5));
 
     private Property<Integer> maxRecords;
 
