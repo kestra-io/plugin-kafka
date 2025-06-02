@@ -136,17 +136,17 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Property<String> groupId;
 
     @Builder.Default
-    private Property<SerdeType> keyDeserializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> keyDeserializer = Property.ofValue(SerdeType.STRING);
 
     @Builder.Default
-    private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
     private OnSerdeError onSerdeError;
 
     private Property<String> since;
 
     @Builder.Default
-    private Property<Duration> pollDuration = Property.of(Duration.ofSeconds(5));
+    private Property<Duration> pollDuration = Property.ofValue(Duration.ofSeconds(5));
 
     private Property<Integer> maxRecords;
 
@@ -166,7 +166,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, renderedGroupId.get());
         } else if (consumerProps.containsKey(ConsumerConfig.GROUP_ID_CONFIG)) {
             // groupId can be passed from properties
-            this.groupId = Property.of(consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG));
+            this.groupId = Property.ofValue(consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG));
         }
 
         if (!consumerProps.contains(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)) {
