@@ -77,7 +77,7 @@ public interface KafkaConsumerInterface {
         @Schema(title = "Behavior in case of serde error.")
         @NotNull
         @Builder.Default
-        Property<OnSerdeErrorBehavior> type = Property.of(OnSerdeErrorBehavior.SKIPPED);
+        Property<OnSerdeErrorBehavior> type = Property.ofValue(OnSerdeErrorBehavior.SKIPPED);
 
         @Schema(title = "Topic used when DLQ has been chosen.")
         Property<String> topic;
