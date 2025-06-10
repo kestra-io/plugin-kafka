@@ -128,7 +128,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     )
     @NotNull
     @Builder.Default
-    private Property<SerdeType> keySerializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> keySerializer = Property.ofValue(SerdeType.STRING);
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "The serializer used for the value.",
@@ -136,7 +136,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     )
     @NotNull
     @Builder.Default
-    private Property<SerdeType> valueSerializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> valueSerializer = Property.ofValue(SerdeType.STRING);
 
     @io.swagger.v3.oas.annotations.media.Schema(
         title = "Avro Schema if the key is set to `AVRO` type."
@@ -152,7 +152,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         title = "Whether the producer should be transactional."
     )
     @Builder.Default
-    private Property<Boolean> transactional = Property.of(true);
+    private Property<Boolean> transactional = Property.ofValue(true);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)

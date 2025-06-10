@@ -47,7 +47,7 @@ class ConsumeTest {
         Consume task = Consume
             .builder()
             .topic("topic")
-            .topicPattern(Property.of(".*"))
+            .topicPattern(Property.ofValue(".*"))
             .build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -59,7 +59,7 @@ class ConsumeTest {
         RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .topicPattern(Property.of(".*"))
+            .topicPattern(Property.ofValue(".*"))
             .build();
         // When/Then
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
@@ -91,7 +91,7 @@ class ConsumeTest {
         Consume task = Consume
             .builder()
             .topic("topic")
-            .since(Property.of(now.toString()))
+            .since(Property.ofValue(now.toString()))
             .build();
 
         // When
@@ -111,8 +111,8 @@ class ConsumeTest {
         Consume task = Consume
             .builder()
             .topic("topic")
-            .partitions(Property.of(List.of(0)))
-            .since(Property.of(now.toString()))
+            .partitions(Property.ofValue(List.of(0)))
+            .since(Property.ofValue(now.toString()))
             .build();
 
         // When
@@ -131,7 +131,7 @@ class ConsumeTest {
         RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .groupId(Property.of("groupId"))
+            .groupId(Property.ofValue("groupId"))
             .topic("topic")
             .build();
 
@@ -153,8 +153,8 @@ class ConsumeTest {
         RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .groupId(Property.of("groupId"))
-            .topicPattern(Property.of(".*"))
+            .groupId(Property.ofValue("groupId"))
+            .topicPattern(Property.ofValue(".*"))
             .build();
 
         // When

@@ -103,7 +103,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private Property<Map<String, String>> properties;
 
     @Builder.Default
-    private Property<Map<String, String>> serdeProperties = Property.of(new HashMap<>());
+    private Property<Map<String, String>> serdeProperties = Property.ofValue(new HashMap<>());
 
     private Object topic;
 
@@ -115,10 +115,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private Property<String> groupId;
 
     @Builder.Default
-    private Property<SerdeType> keyDeserializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> keyDeserializer = Property.ofValue(SerdeType.STRING);
 
     @Builder.Default
-    private Property<SerdeType> valueDeserializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
     private OnSerdeError onSerdeError;
 
