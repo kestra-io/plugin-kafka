@@ -4,14 +4,15 @@ import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
-import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
+import io.kestra.core.models.property.Data;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.annotation.Nullable;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -41,7 +42,6 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Collectors;
 import jakarta.validation.constraints.NotNull;
-import reactor.core.publisher.Flux;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -50,8 +50,10 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
-@io.swagger.v3.oas.annotations.media.Schema(
-    title = "Send a message to a Kafka topic."
+@Schema(
+    title = "Send a message to a Kafka topic.",
+    description = """
+        Message must be passed as document with keys: key, value, topic, partition, timestamp, headers."""
 )
 @Plugin(
     examples = {
@@ -66,12 +68,12 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                   - id: file
                     type: FILE
                     description: A CSV file with columns: id, username, tweet, and timestamp.
-                
+
                 tasks:
                   - id: csv_to_ion
                     type: io.kestra.plugin.serdes.csv.CsvToIon
                     from: "{{ inputs.file }}"
-                
+
                   - id: ion_to_avro_schema
                     type: io.kestra.plugin.scripts.nashorn.FileTransform
                     from: "{{ outputs.csv_to_ion.uri }}"
@@ -88,7 +90,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                         }
                       };
                       row = result
-                
+
                   - id: avro_to_kafka
                     type: io.kestra.plugin.kafka.Produce
                     from: "{{ outputs.ion_to_avro_schema.uri }}"
@@ -105,54 +107,46 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
         )
     }
 )
-public class Produce extends AbstractKafkaConnection implements RunnableTask<Produce.Output> {
-    @io.swagger.v3.oas.annotations.media.Schema(
+public class Produce extends AbstractKafkaConnection implements RunnableTask<Produce.Output>, Data.From {
+    @Schema(
         title = "Kafka topic to which the message should be sent.",
         description = "Could also be passed inside the `from` property using the key `topic`."
     )
     private Property<String> topic;
 
-    @io.swagger.v3.oas.annotations.media.Schema(
-        title = "The content of the message to be sent to Kafka.",
-        description = "Can be a Kestra internal storage URI, a map (i.e. a list of key-value pairs) or a list of maps. " +
-            "The following keys are supported: `key`, `value`, `partition`, `timestamp`, and `headers`.",
-        anyOf = {String.class, List.class, Map.class}
-    )
-    @NotNull
-    @PluginProperty(dynamic = true)
     private Object from;
 
-    @io.swagger.v3.oas.annotations.media.Schema(
+    @Schema(
         title = "The serializer used for the key.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     @Builder.Default
-    private Property<SerdeType> keySerializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> keySerializer = Property.ofValue(SerdeType.STRING);
 
-    @io.swagger.v3.oas.annotations.media.Schema(
+    @Schema(
         title = "The serializer used for the value.",
         description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     @Builder.Default
-    private Property<SerdeType> valueSerializer = Property.of(SerdeType.STRING);
+    private Property<SerdeType> valueSerializer = Property.ofValue(SerdeType.STRING);
 
-    @io.swagger.v3.oas.annotations.media.Schema(
+    @Schema(
         title = "Avro Schema if the key is set to `AVRO` type."
     )
     private Property<String> keyAvroSchema;
 
-    @io.swagger.v3.oas.annotations.media.Schema(
+    @Schema(
         title = "Avro Schema if the value is set to `AVRO` type."
     )
     private Property<String> valueAvroSchema;
 
-    @io.swagger.v3.oas.annotations.media.Schema(
+    @Schema(
         title = "Whether the producer should be transactional."
     )
     @Builder.Default
-    private Property<Boolean> transactional = Property.of(true);
+    private Property<Boolean> transactional = Property.ofValue(true);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -182,38 +176,20 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         valSerial.configure(serdesProperties, false);
 
 
-        KafkaProducer<Object, Object> producer = null;
+        KafkaProducer<Object, Object> producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
         try {
-            producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
-            Integer count = 1;
-
             if (transactional) {
                 producer.initTransactions();
                 producer.beginTransaction();
             }
 
-            if (this.from instanceof String || this.from instanceof List) {
-                Flux<Object> flowable;
-                Flux<Integer> resultFlowable;
-                if (this.from instanceof String) {
-                    URI from = new URI(runContext.render((String) this.from));
-                    try (BufferedReader inputStream = new BufferedReader(new InputStreamReader(runContext.storage().getFile(from)))) {
-                        flowable = FileSerde.readAll(inputStream);
-                        resultFlowable = this.buildFlowable(flowable, runContext, producer);
-
-                        count = resultFlowable
-                            .reduce(Integer::sum)
-                            .blockOptional().orElse(0);
-                    }
-                } else {
-                    flowable = Flux.fromArray(((List<Object>) this.from).toArray());
-                    resultFlowable = this.buildFlowable(flowable, runContext, producer);
-
-                    count = resultFlowable.reduce(Integer::sum).blockOptional().orElse(0);
-                }
-            } else {
-                producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) this.from));
-            }
+            Integer count = Data.from(from).read(runContext)
+                .map(throwFunction(row -> {
+                    producer.send(this.producerRecord(runContext, producer, row));
+                    return 1;
+                }))
+                .reduce(Integer::sum)
+                .blockOptional().orElse(0);
 
             // metrics
             runContext.metric(Counter.of("records", count));
@@ -222,13 +198,11 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 .messagesCount(count)
                 .build();
         } finally {
-            if (producer != null) {
-                if (transactional) {
-                    producer.commitTransaction();
-                }
-                producer.flush();
-                producer.close();
+            if (transactional) {
+                producer.commitTransaction();
             }
+            producer.flush();
+            producer.close();
         }
     }
 
@@ -239,16 +213,6 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             .orElse(null);
     }
 
-    @SuppressWarnings("unchecked")
-    private Flux<Integer> buildFlowable(Flux<Object> flowable, RunContext runContext, KafkaProducer<Object, Object> producer) throws Exception {
-        return flowable
-            .map(throwFunction(row -> {
-                producer.send(this.producerRecord(runContext, producer, (Map<String, Object>) row));
-                return 1;
-            }));
-    }
-
-    @SuppressWarnings("unchecked")
     private ProducerRecord<Object, Object> producerRecord(RunContext runContext, KafkaProducer<Object, Object> producer, Map<String, Object> map) throws Exception {
         Object key;
         Object value;
