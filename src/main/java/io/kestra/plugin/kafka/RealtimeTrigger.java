@@ -5,11 +5,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.triggers.AbstractTrigger;
-import io.kestra.core.models.triggers.RealtimeTriggerInterface;
-import io.kestra.core.models.triggers.TriggerContext;
-import io.kestra.core.models.triggers.TriggerOutput;
-import io.kestra.core.models.triggers.TriggerService;
+import io.kestra.core.models.triggers.*;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -24,7 +20,10 @@ import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -62,7 +61,8 @@ import java.util.concurrent.atomic.AtomicReference;
                       schema.registry.url: http://localhost:8085
                       keyDeserializer: STRING
                       valueDeserializer: AVRO
-                    groupId: kafkaConsumerGroupId"""
+                    groupId: kafkaConsumerGroupId
+                """
         ),
         @Example(
             full = true,
@@ -162,26 +162,40 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
                                                                final RunContext runContext) {
         return Flux.create(fluxSink -> {
-            try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
+            KafkaConsumer<Object, Object> consumer = null;
+            try {
+                consumer = task.consumer(runContext);
                 this.consumer.set(consumer);
                 task.topicSubscription(runContext).subscribe(runContext, consumer, task);
+
                 while (isActive.get()) {
                     try {
                         consumer.poll(Duration.ofMillis(Long.MAX_VALUE)).forEach(fluxSink::next);
                         consumer.commitSync();
-                    } catch (org.apache.kafka.common.errors.InterruptException e) {
-                        // ignore, this case is handle by next lines
+                    } catch (WakeupException e) {
+                        if (!isActive.get()) {
+                            break;
+                        }
+                    } catch (Exception e) {
+                        fluxSink.error(e);
+                        break;
                     }
                     // Check if the current thread has been interrupted before next poll.
                     if (Thread.currentThread().isInterrupted()) {
                         isActive.set(false); // proactively stop polling
+                        break;
                     }
                 }
-            } catch (WakeupException e) {
-                // ignore and stop
             } catch (Exception e) {
                 fluxSink.error(e);
             } finally {
+                if (consumer != null) {
+                    try {
+                        consumer.close();
+                    } catch (Exception e) {
+                        runContext.logger().error("Error while trying to close the Kafka consumer", e);
+                    }
+                }
                 fluxSink.complete();
                 this.waitForTermination.countDown();
             }
