@@ -1,7 +1,8 @@
 package io.kestra.plugin.kafka;
 
-
+import com.github.tomakehurst.wiremock.WireMockServer;
 import com.google.common.collect.ImmutableMap;
+import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
@@ -11,8 +12,10 @@ import io.kestra.core.tenant.TenantService;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
-import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Assertions;
@@ -32,6 +35,7 @@ import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.stream.Stream;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -142,7 +146,7 @@ public class KafkaTest {
         Consume consume = Consume.builder()
             .properties(Property.ofValue(Map.of(
                 "bootstrap.servers", this.bootstrap,
-                "auto.offset.reset" , "earliest",
+                "auto.offset.reset", "earliest",
                 "max.poll.records", "15"
             )))
             .groupId(Property.ofValue(IdUtils.create()))
@@ -245,13 +249,13 @@ public class KafkaTest {
                 .put("value", UUID.randomUUID())
                 .put("timestamp", Instant.now().toEpochMilli())
                 .build()),
-            Arguments.of(SerdeType.JSON, SerdeType.VOID,mapVoid)
+            Arguments.of(SerdeType.JSON, SerdeType.VOID, mapVoid)
         );
     }
 
     @ParameterizedTest
     @MethodSource("sourceAsMap")
-    void fromAsMap(SerdeType keySerializer, SerdeType valueSerializer, Map<Object,Object> from) throws Exception {
+    void fromAsMap(SerdeType keySerializer, SerdeType valueSerializer, Map<Object, Object> from) throws Exception {
         RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
@@ -424,26 +428,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("number", 42);
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "number",
-                              "type": "long"
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "number",
+                      "type": "long"
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -457,26 +461,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("number", 42.0d);
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "number",
-                              "type": "float"
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "number",
+                      "type": "float"
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -490,29 +494,29 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("product", Map.of("id", "v1"));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "product",
-                              "type": [
-                                "null",
-                                {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}
-                              ]
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "product",
+                      "type": [
+                        "null",
+                        {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}
+                      ]
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -528,29 +532,29 @@ public class KafkaTest {
         value.put("product", null);
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "product",
-                              "type": [
-                                "null",
-                                {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}
-                              ]
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "product",
+                      "type": [
+                        "null",
+                        {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}
+                      ]
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -564,35 +568,35 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("address", Map.of("city", "Paris", "country", "FR", "longitude", 2.3522, "latitude", 48.8566));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "address",
-                              "type": {
-                                "type": "record",
-                                "name": "Address",
-                                "fields": [
-                                  {"name": "city", "type": "string"},
-                                  {"name": "country", "type": "string"},
-                                  {"name": "longitude", "type": "float"},
-                                  {"name": "latitude", "type": "float"}
-                                ]
-                              }
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "address",
+                      "type": {
+                        "type": "record",
+                        "name": "Address",
+                        "fields": [
+                          {"name": "city", "type": "string"},
+                          {"name": "country", "type": "string"},
+                          {"name": "longitude", "type": "float"},
+                          {"name": "latitude", "type": "float"}
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -606,26 +610,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("map", Map.of("foo", 42, "bar", 17));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "map",
-                              "type": {"type": "map", "values": "int"}
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "map",
+                      "type": {"type": "map", "values": "int"}
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -639,26 +643,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("map", Map.of("foo", Map.of("id", "v1"), "bar", Map.of("id", "v2")));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "map",
-                              "type": {"type": "map", "values": {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}}
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "map",
+                      "type": {"type": "map", "values": {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}}
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -672,26 +676,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("array", List.of("foo", "bar"));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "array",
-                              "type": {"type": "array", "items": "string"}
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "array",
+                      "type": {"type": "array", "items": "string"}
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -705,26 +709,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("array", List.of(Map.of("id", "v1"), Map.of("id", "v2")));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "array",
-                              "type": {"type": "array", "items": {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}}
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "array",
+                      "type": {"type": "array", "items": {"type": "record", "name": "Version", "fields": [{"name": "id", "type": "string"}]}}
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -738,26 +742,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("state", "SUCCESS");
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "state",
-                              "type": {"name": "StateEnum", "type": "enum", "symbols": ["SUCCESS", "FAILED"]}
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "state",
+                      "type": {"name": "StateEnum", "type": "enum", "symbols": ["SUCCESS", "FAILED"]}
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -771,26 +775,26 @@ public class KafkaTest {
         Map<String, Object> value = Map.of("base64", Base64.getEncoder().encode("Hello, World!".getBytes(UTF_8)));
 
         Produce task = Produce.builder()
-                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-                .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-                .keySerializer(Property.ofValue(SerdeType.STRING))
-                .valueSerializer(Property.ofValue(SerdeType.AVRO))
-                .topic(Property.ofValue(topic))
-                .valueAvroSchema(Property.ofValue("""
-                        {
-                          "type": "record",
-                          "name": "Sample",
-                          "namespace": "io.kestra.examples",
-                          "fields": [
-                            {
-                              "name": "base64",
-                              "type": {"name": "Base64", "type": "fixed", "size": 16}
-                            }
-                          ]
-                        }
-                        """))
-                .from(Map.of("value", value))
-                .build();
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.AVRO))
+            .topic(Property.ofValue(topic))
+            .valueAvroSchema(Property.ofValue("""
+                {
+                  "type": "record",
+                  "name": "Sample",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {
+                      "name": "base64",
+                      "type": {"name": "Base64", "type": "fixed", "size": 16}
+                    }
+                  ]
+                }
+                """))
+            .from(Map.of("value", value))
+            .build();
 
         Produce.Output output = task.run(runContext);
         assertThat(output.getMessagesCount(), is(1));
@@ -899,6 +903,110 @@ public class KafkaTest {
 
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), nullValue());
+    }
+
+    @Test
+    void produceAndConsumeWithAwsGlue() throws Exception {
+        System.setProperty("AWS_ACCESS_KEY_ID", "dummy");
+        System.setProperty("AWS_SECRET_ACCESS_KEY", "dummy");
+        System.setProperty("AWS_REGION", "eu-west-1");
+        System.setProperty("aws.glue.endpoint", "http://localhost:8086");
+
+        WireMockServer glueMock = new WireMockServer(8086);
+        glueMock.start();
+
+        try {
+            configureFor("localhost", 8086);
+
+            glueMock.stubFor(post(urlMatching("/v1/registries/name/.*/schemas/name/.*"))
+                .willReturn(aResponse()
+                    .withStatus(200)
+                    .withBody("{ \"SchemaVersionId\": \"test-version-id\" }")));
+
+            glueMock.stubFor(get(urlMatching("/v1/registries/name/.*/schemas/name/.*"))
+                .willReturn(aResponse()
+                    .withStatus(200)
+                    .withBody("""
+                            {
+                              "SchemaName": "twitter_schema",
+                              "DataFormat": "AVRO",
+                              "SchemaDefinition": "{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"twitter_schema\\\",\\\"namespace\\\":\\\"io.kestra.examples\\\",\\\"fields\\\":[{\\\"name\\\":\\\"username\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"tweet\\\",\\\"type\\\":\\\"string\\\"}]}"
+                            }
+                        """)));
+
+            glueMock.stubFor(get(urlMatching("/v1/registries/name/.*/schemas/name/.*/versions/latest"))
+                .willReturn(aResponse()
+                    .withStatus(200)
+                    .withBody("""
+                            {
+                              "SchemaVersionId": "test-version-id",
+                              "SchemaDefinition": "{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"twitter_schema\\\",\\\"namespace\\\":\\\"io.kestra.examples\\\",\\\"fields\\\":[{\\\"name\\\":\\\"username\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"tweet\\\",\\\"type\\\":\\\"string\\\"}]}"
+                            }
+                        """)));
+
+            String avroSchema = """
+                {
+                  "type": "record",
+                  "name": "twitter_schema",
+                  "namespace": "io.kestra.examples",
+                  "fields": [
+                    {"name": "username", "type": "string"},
+                    {"name": "tweet", "type": "string"}
+                  ]
+                }
+                """;
+
+            Schema schema = new Schema.Parser().parse(avroSchema);
+            GenericRecord record = new GenericData.Record(schema);
+            record.put("username", "bob");
+            record.put("tweet", "hello");
+
+            String topic = "test_" + IdUtils.create();
+
+            Produce produce = Produce.builder()
+                .id("produce")
+                .type(Produce.class.getName())
+                .from(Map.of(
+                    "key", "abc",
+                    "value", record
+                ))
+                .topic(Property.ofValue(topic))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:9092"
+                )))
+                .serdeProperties(Property.ofValue(Map.of(
+                    "schema.registry.url", "http://localhost:8086",
+                    "dataFormat", "AVRO",
+                    "schemaName", "twitter_schema",
+                    "registry.name", "test-registry",
+                    "aws.region", "eu-west-1"
+                )))
+                .valueSerializer(Property.ofValue(SerdeType.AVRO))
+//                .schemaRegistryVendor() // FIXME
+                .valueAvroSchema(Property.ofValue(avroSchema))
+                .build();
+
+            Consume consume = Consume.builder()
+                .id("consume")
+                .type(Consume.class.getName())
+                .topic(Property.ofValue(topic))
+                .groupId(Property.ofValue("test-" + IdUtils.create()))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:9092"
+                )))
+                .serdeProperties(produce.getSerdeProperties())
+                .valueDeserializer(Property.ofValue(SerdeType.AVRO))
+//                .schemaRegistryVendor() // FIXME
+                .build();
+
+            RunContext runContext = runContextFactory.of();
+
+            produce.run(runContext);
+            consume.run(runContext);
+
+        } finally {
+            glueMock.stop();
+        }
     }
 
     private static void assertOutputFile(RunContext runContext, Consume.Output consumeOutput) throws IOException {
