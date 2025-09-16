@@ -2,6 +2,7 @@ package io.kestra.plugin.kafka;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
@@ -11,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -175,6 +177,12 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
+    @Schema(
+        title = "Schema registry vendor."
+    )
+    @PluginProperty
+    private SchemaRegistryVendor schemaRegistryVendor;
+
     private OnSerdeError onSerdeError;
 
     private Property<String> since;
@@ -215,6 +223,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .acknowledgeType(this.acknowledgeType)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
+            .schemaRegistryVendor(this.schemaRegistryVendor)
             .onSerdeError(this.onSerdeError)
             .since(this.since)
             .headerFilters(this.headerFilters)
