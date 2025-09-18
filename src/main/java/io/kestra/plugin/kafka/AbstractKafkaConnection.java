@@ -38,6 +38,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
     protected Property<Map<String, String>> serdeProperties = Property.ofValue(new HashMap<>());
 
     @Getter(AccessLevel.NONE)
+    @Builder.Default
     protected AtomicReference<Object> dataOnSerdeError = new AtomicReference<>();
 
     protected static Properties createProperties(Property<Map<String, String>> mapProperties, RunContext runContext) throws Exception {
