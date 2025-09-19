@@ -120,6 +120,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
+    @Builder.Default
+    private Property<ValueVendor> valueDeserializerVendor = Property.ofValue(ValueVendor.CONFLUENT);
+
     private OnSerdeError onSerdeError;
 
     private Property<String> since;
@@ -151,6 +154,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .groupId(this.groupId)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
+            .valueDeserializerVendor(this.valueDeserializerVendor)
             .onSerdeError(this.onSerdeError)
             .since(this.since)
             .build();
