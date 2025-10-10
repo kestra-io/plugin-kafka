@@ -9,17 +9,12 @@ import io.kestra.core.models.property.Data;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.annotation.Nullable;
-import lombok.AccessLevel;
-import lombok.Builder;
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -28,9 +23,6 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.Serializer;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -41,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Collectors;
-import jakarta.validation.constraints.NotNull;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -133,6 +124,12 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private Property<SerdeType> valueSerializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
+        title = "Vendor used for the value serializer. Could be `CONFLUENT` (default), `AWS_GLUE`, or `NONE` (no registry)."
+    )
+    @Builder.Default
+    private Property<ValueVendor> valueSerializerVendor = Property.ofValue(ValueVendor.CONFLUENT);
+
+    @Schema(
         title = "Avro Schema if the key is set to `AVRO` type."
     )
     private Property<String> keyAvroSchema;
@@ -152,11 +149,9 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @Getter(AccessLevel.NONE)
     protected transient List<String> connectionCheckers = new ArrayList<>();
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     @Override
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public Output run(RunContext runContext) throws Exception {
-
-        // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
         final boolean transactional = runContext.render(this.transactional).as(Boolean.class).orElse(true);
 
@@ -167,16 +162,28 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         Properties serdesProperties = createProperties(this.serdeProperties, runContext);
 
-        Serializer keySerial = getTypedSerializer(runContext.render(this.keySerializer).as(SerdeType.class).orElse(SerdeType.STRING),
-            parseAvroSchema(runContext, keyAvroSchema));
-        Serializer valSerial = getTypedSerializer(runContext.render(this.valueSerializer).as(SerdeType.class).orElse(SerdeType.STRING),
-            parseAvroSchema(runContext, valueAvroSchema));
+        SerdeType keySerdeType = runContext.render(this.keySerializer).as(SerdeType.class).orElse(SerdeType.STRING);
+        SerdeType valueSerdeType = runContext.render(this.valueSerializer).as(SerdeType.class).orElse(SerdeType.STRING);
+        ValueVendor vendor = runContext.render(this.valueSerializerVendor).as(ValueVendor.class).orElse(ValueVendor.CONFLUENT);
 
-        keySerial.configure(serdesProperties, true);
-        valSerial.configure(serdesProperties, false);
+        Serializer<Object> keySerial = (Serializer<Object>) getTypedSerializer(keySerdeType, parseAvroSchema(runContext, keyAvroSchema));
+        Serializer<Object> valSerial = (Serializer<Object>) switch (vendor) {
+            case CONFLUENT, NONE -> getTypedSerializer(valueSerdeType, parseAvroSchema(runContext, valueAvroSchema));
+            case AWS_GLUE -> io.kestra.plugin.kafka.serdes.AwsGlueSerializerFactory.getSerializer(valueSerdeType);
+        };
 
+        Map<String, Object> serdesMap = serdesProperties.entrySet()
+            .stream()
+            .collect(Collectors.toMap(
+                e -> String.valueOf(e.getKey()),
+                Map.Entry::getValue
+            ));
 
-        KafkaProducer<Object, Object> producer = new KafkaProducer<Object, Object>(properties, keySerial, valSerial);
+        keySerial.configure(serdesMap, true);
+        valSerial.configure(serdesMap, false);
+
+        KafkaProducer<Object, Object> producer = new KafkaProducer<>(properties, keySerial, valSerial);
+
         try {
             if (transactional) {
                 producer.initTransactions();
@@ -191,7 +198,6 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 .reduce(Integer::sum)
                 .blockOptional().orElse(0);
 
-            // metrics
             runContext.metric(Counter.of("records", count));
 
             return Output.builder()
@@ -205,6 +211,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             producer.close();
         }
     }
+
 
     @Nullable
     private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable Property<String> avroSchema) throws IllegalVariableEvaluationException {
@@ -286,7 +293,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             return ((Map<?, ?>) headers)
                 .entrySet()
                 .stream()
-                .map(o -> new RecordHeader((String)o.getKey(), ((String)o.getValue()).getBytes(StandardCharsets.UTF_8)))
+                .map(o -> new RecordHeader((String) o.getKey(), ((String) o.getValue()).getBytes(StandardCharsets.UTF_8)))
                 .collect(Collectors.toList());
         }
 
