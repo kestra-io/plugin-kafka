@@ -68,7 +68,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
-    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.4'
+    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.5'
 
 }
 
