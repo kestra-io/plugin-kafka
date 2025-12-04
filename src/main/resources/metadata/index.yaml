@@ -1,8 +1,8 @@
 group: io.kestra.plugin.kafka
 name: "kafka"
 title: "Apache Kafka"
-description: "This sub-group of plugins contains tasks for using the Apache Kafka message broker. Apache Kafka is an open-source distributed event streaming platform used by thousands of companies for high-performance data pipelines, streaming analytics, data integration, and mission-critical applications."
-body: ""
+description: "Tasks that produce, consume, and trigger workflows from Apache Kafka topics."
+body: "Set bootstrap servers, topic names, and serializers along with security settings (SASL/SSL) to publish messages, poll or stream consumes, and use triggers to start flows on new records with offsets and consumer group controls."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"
