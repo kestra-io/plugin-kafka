@@ -59,6 +59,31 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 @Plugin(
     examples = {
         @Example(
+            title = "Send a string to a Kafka topic",
+            full = true,
+            code = """
+                id: kafka_producer
+                namespace: company.team
+
+                tasks:
+                  - id: kafka_producer
+                    type: io.kestra.plugin.kafka.Produce
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    topic: example_topic
+                    from: 
+                      key: "{{ execution.id }}"
+                      value: "Hello, World!"
+                      timestamp: "{{ execution.startDate }}"
+                      headers:
+                        x-header: some value
+                    keySerializer: STRING
+                    valueSerializer: STRING
+                    serdeProperties:
+                      schema.registry.url: http://localhost:8085
+                """
+        ),
+        @Example(
             title = "Read a CSV file, transform it and send it to Kafka.",
             full = true,
             code = """
@@ -76,7 +101,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                     from: "{{ inputs.file }}"
 
                   - id: ion_to_avro_schema
-                    type: io.kestra.plugin.scripts.nashorn.FileTransform
+                    type: io.kestra.plugin.scripts.graalvm.FileTransform
                     from: "{{ outputs.csv_to_ion.uri }}"
                     script: |
                       var result = {
@@ -100,7 +125,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                       bootstrap.servers: localhost:9092
                     serdeProperties:
                       schema.registry.url: http://localhost:8085
-                    topic: test_kestra
+                    topic: example_topic
                     valueAvroSchema: |
                       {"type":"record","name":"twitter_schema","namespace":"io.kestra.examples","fields":[{"name":"username","type":"string"},{"name\":"tweet","type":"string"}]}
                     valueSerializer: AVRO
