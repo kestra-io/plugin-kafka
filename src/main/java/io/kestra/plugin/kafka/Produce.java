@@ -72,7 +72,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                       bootstrap.servers: localhost:9092
                     topic: example_topic
                     from: 
-                      key: message
+                      key: "{{ execution.id }}"
                       value: "Hello, World!"
                       timestamp: "{{ execution.startDate }}"
                       headers:
