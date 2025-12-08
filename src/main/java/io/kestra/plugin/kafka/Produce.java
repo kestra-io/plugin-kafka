@@ -101,7 +101,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                     from: "{{ inputs.file }}"
 
                   - id: ion_to_avro_schema
-                    type: io.kestra.plugin.scripts.graalvm.FileTransform
+                    type: io.kestra.plugin.graalvm.js.FileTransform
                     from: "{{ outputs.csv_to_ion.uri }}"
                     script: |
                       var result = {
