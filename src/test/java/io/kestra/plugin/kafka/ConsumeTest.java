@@ -182,4 +182,46 @@ class ConsumeTest {
         // Then
         assertThat(inputs, Matchers.containsInAnyOrder(outputs.toArray()));
     }
+
+    @Test
+    void shouldAcceptAllWhenNoHeaderFilters() {
+        Consume task = Consume.builder().build();
+
+        Headers headers = new RecordHeaders()
+            .add("eventType", "order.created".getBytes(StandardCharsets.UTF_8));
+
+        Assertions.assertTrue(task.matchHeaders(headers, null));
+        Assertions.assertTrue(task.matchHeaders(headers, Map.of()));
+    }
+
+    @Test
+    void shouldAcceptWhenAllHeadersMatch() {
+        Consume task = Consume.builder().build();
+
+        Headers headers = new RecordHeaders()
+            .add("eventType", "order.created".getBytes(StandardCharsets.UTF_8))
+            .add("version", "v1".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, String> filters = Map.of(
+            "eventType", "order.created",
+            "version", "v1"
+        );
+
+        Assertions.assertTrue(task.matchHeaders(headers, filters));
+    }
+
+    @Test
+    void shouldRejectWhenHeaderIsMissing() {
+        Consume task = Consume.builder().build();
+
+        Headers headers = new RecordHeaders()
+            .add("eventType", "order.created".getBytes(StandardCharsets.UTF_8));
+
+        Map<String, String> filters = Map.of(
+            "eventType", "order.created",
+            "version", "v1"
+        );
+
+        Assertions.assertFalse(task.matchHeaders(headers, filters));
+    }
 }
