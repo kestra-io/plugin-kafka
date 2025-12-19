@@ -136,6 +136,12 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Getter(AccessLevel.NONE)
     private final AtomicReference<Consumer<Object, Object>> consumer = new AtomicReference<>();
 
+    @Schema(
+        title = "Filter messages by Kafka headers",
+        description = "Only consume messages whose headers match these conditions"
+    )
+    private Property<Map<String, String>> headerFilters;
+
     @Override
     public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) {
         RunContext runContext = conditionContext.getRunContext();
@@ -153,6 +159,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .valueDeserializer(this.valueDeserializer)
             .onSerdeError(this.onSerdeError)
             .since(this.since)
+            .headerFilters(this.headerFilters)
             .build();
 
         return Flux.from(publisher(task, runContext))
@@ -167,7 +174,15 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 task.topicSubscription(runContext).subscribe(runContext, consumer, task);
                 while (isActive.get()) {
                     try {
-                        consumer.poll(Duration.ofMillis(Long.MAX_VALUE)).forEach(fluxSink::next);
+                        var rFilters = runContext.render(task.getHeaderFilters()).asMap(String.class, String.class);
+
+                        consumer.poll(Duration.ofMillis(Long.MAX_VALUE))
+                            .forEach(record -> {
+                                if (task.matchHeaders(record.headers(), rFilters)) {
+                                    fluxSink.next(record);
+                                }
+                            });
+
                         consumer.commitSync();
                     } catch (org.apache.kafka.common.errors.InterruptException e) {
                         // ignore, this case is handle by next lines

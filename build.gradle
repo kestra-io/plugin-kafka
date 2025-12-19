@@ -1,5 +1,5 @@
 plugins {
-    id "com.vanniktech.maven.publish" version "0.34.0"
+    id "com.vanniktech.maven.publish" version "0.35.0"
     id "io.kestra.gradle.inject-bom-versions" version "1.0.0"
     id 'java-library'
     id "idea"
@@ -68,7 +68,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
-    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.4'
+    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.5'
 
 }
 

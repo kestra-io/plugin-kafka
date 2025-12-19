@@ -91,6 +91,12 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     private Property<Duration> maxDuration;
 
+    @Schema(
+        title = "Filter messages by Kafka headers",
+        description = "Only consume messages whose headers match these conditions"
+    )
+    private Property<Map<String, String>> headerFilters;
+
     @Override
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
         RunContext runContext = conditionContext.getRunContext();
@@ -112,6 +118,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .pollDuration(this.pollDuration)
             .maxRecords(this.maxRecords)
             .maxDuration(this.maxDuration)
+            .headerFilters(this.headerFilters)
             .build();
         Consume.Output run = task.run(runContext);
 
