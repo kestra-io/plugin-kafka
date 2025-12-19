@@ -164,6 +164,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Getter(AccessLevel.PACKAGE)
     private ConsumerSubscription subscription;
 
+    @Schema(
+        title = "Filter messages by Kafka headers",
+        description = "Only consume messages whose headers match these conditions"
+    )
+    private Property<Map<String, String>> headerFilters;
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     public KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
         // ugly hack to force use of Kestra plugins classLoader
@@ -223,6 +229,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 empty = records.isEmpty();
 
                 records.forEach(throwConsumer(consumerRecord -> {
+                    if (!matchHeaders(consumerRecord.headers(), runContext.render(headerFilters).asMap(String.class, String.class))) {
+                        return;
+                    }
+
                     FileSerde.write(output, this.recordToMessage(consumerRecord));
 
                     total.getAndIncrement();
@@ -313,6 +323,25 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         return false;
     }
+
+     boolean matchHeaders(Headers headers, Map<String, String> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return true;
+        }
+
+        for (Map.Entry<String, String> entry : filters.entrySet()) {
+            var header = headers.lastHeader(entry.getKey());
+            if (header == null) {
+                return false;
+            }
+            String value = new String(header.value(), StandardCharsets.UTF_8);
+            if (!value.equals(entry.getValue())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
 
     public ConsumerSubscription topicSubscription(final RunContext runContext) throws IllegalVariableEvaluationException {
         validateConfiguration();
