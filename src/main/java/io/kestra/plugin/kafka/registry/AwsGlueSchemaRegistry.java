@@ -2,11 +2,7 @@ package io.kestra.plugin.kafka.registry;
 
 import com.amazonaws.services.schemaregistry.common.configs.GlueSchemaRegistryConfiguration;
 import com.amazonaws.services.schemaregistry.deserializers.avro.AWSKafkaAvroDeserializer;
-import com.amazonaws.services.schemaregistry.deserializers.json.JsonDeserializer;
-import com.amazonaws.services.schemaregistry.deserializers.protobuf.ProtobufDeserializer;
 import com.amazonaws.services.schemaregistry.serializers.avro.AWSKafkaAvroSerializer;
-import com.amazonaws.services.schemaregistry.serializers.json.JsonSerializer;
-import com.amazonaws.services.schemaregistry.serializers.protobuf.ProtobufSerializer;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
@@ -94,8 +90,6 @@ public class AwsGlueSchemaRegistry extends SchemaRegistryVendor {
                 serializer.configure(configurationToMap(configuration), false);
                 yield serializer;
             }
-            case JSON -> new JsonSerializer(configuration);
-            case PROTOBUF -> new ProtobufSerializer(configuration);
             default -> throw new IllegalArgumentException("SerdeType not supported by AWS Glue: " + valueSerdeType);
         };
     }
@@ -112,8 +106,6 @@ public class AwsGlueSchemaRegistry extends SchemaRegistryVendor {
                 deserializer.configure(configurationToMap(configuration), false);
                 yield deserializer;
             }
-            case JSON -> new JsonDeserializer(configuration);
-            case PROTOBUF -> new ProtobufDeserializer(configuration);
             default -> throw new IllegalArgumentException("SerdeType not supported by AWS Glue: " + valueSerdeType);
         };
     }
@@ -134,6 +126,9 @@ public class AwsGlueSchemaRegistry extends SchemaRegistryVendor {
             .orElseThrow(() -> new IllegalArgumentException("AWS secret key must be defined for Glue Schema Registry"));
 
         Map<String, Object> config = new HashMap<>();
+        config.put("region", rRegion);
+        config.put("endpoint", rEndpoint);
+        // Keep compatibility with previous key names.
         config.put("aws.region", rRegion);
         config.put("aws.glue.endpoint", rEndpoint);
         config.put("aws.access.key.id", rAccessKey);
@@ -148,6 +143,9 @@ public class AwsGlueSchemaRegistry extends SchemaRegistryVendor {
      */
     private Map<String, Object> configurationToMap(GlueSchemaRegistryConfiguration configuration) {
         Map<String, Object> map = new HashMap<>();
+        map.put("region", configuration.getRegion());
+        map.put("endpoint", configuration.getEndPoint());
+        // Keep compatibility with previous key names.
         map.put("aws.region", configuration.getRegion());
         map.put("aws.glue.endpoint", configuration.getEndPoint());
         return map;

@@ -10,6 +10,7 @@ import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.tenant.TenantService;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.plugin.kafka.registry.ValueSerdeVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Inject;
@@ -918,30 +919,18 @@ public class KafkaTest {
         try {
             configureFor("localhost", 8086);
 
-            glueMock.stubFor(post(urlMatching("/v1/registries/name/.*/schemas/name/.*"))
-                .willReturn(aResponse()
-                    .withStatus(200)
-                    .withBody("{ \"SchemaVersionId\": \"test-version-id\" }")));
-
-            glueMock.stubFor(get(urlMatching("/v1/registries/name/.*/schemas/name/.*"))
+            glueMock.stubFor(post(urlEqualTo("/"))
                 .willReturn(aResponse()
                     .withStatus(200)
                     .withBody("""
-                            {
-                              "SchemaName": "twitter_schema",
-                              "DataFormat": "AVRO",
-                              "SchemaDefinition": "{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"twitter_schema\\\",\\\"namespace\\\":\\\"io.kestra.examples\\\",\\\"fields\\\":[{\\\"name\\\":\\\"username\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"tweet\\\",\\\"type\\\":\\\"string\\\"}]}"
-                            }
-                        """)));
-
-            glueMock.stubFor(get(urlMatching("/v1/registries/name/.*/schemas/name/.*/versions/latest"))
-                .willReturn(aResponse()
-                    .withStatus(200)
-                    .withBody("""
-                            {
-                              "SchemaVersionId": "test-version-id",
-                              "SchemaDefinition": "{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"twitter_schema\\\",\\\"namespace\\\":\\\"io.kestra.examples\\\",\\\"fields\\\":[{\\\"name\\\":\\\"username\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"tweet\\\",\\\"type\\\":\\\"string\\\"}]}"
-                            }
+                        {
+                          "SchemaVersionId": "11111111-1111-1111-1111-111111111111",
+                          "SchemaArn": "arn:aws:glue:eu-west-1:123456789012:schema/test-registry/twitter_schema",
+                          "SchemaName": "twitter_schema",
+                          "DataFormat": "AVRO",
+                          "Status": "AVAILABLE",
+                          "SchemaDefinition": "{\\\"type\\\":\\\"record\\\",\\\"name\\\":\\\"twitter_schema\\\",\\\"namespace\\\":\\\"io.kestra.examples\\\",\\\"fields\\\":[{\\\"name\\\":\\\"username\\\",\\\"type\\\":\\\"string\\\"},{\\\"name\\\":\\\"tweet\\\",\\\"type\\\":\\\"string\\\"}]}"
+                        }
                         """)));
 
             String avroSchema = """
@@ -982,27 +971,30 @@ public class KafkaTest {
                     "aws.region", "eu-west-1"
                 )))
                 .valueSerializer(Property.ofValue(SerdeType.AVRO))
-//                .schemaRegistryVendor() // FIXME
+                .valueSerializerVendor(Property.ofValue(ValueSerdeVendor.AWS_GLUE))
                 .valueAvroSchema(Property.ofValue(avroSchema))
                 .build();
 
             Consume consume = Consume.builder()
                 .id("consume")
                 .type(Consume.class.getName())
-                .topic(Property.ofValue(topic))
+                .topic(topic)
                 .groupId(Property.ofValue("test-" + IdUtils.create()))
                 .properties(Property.ofValue(Map.of(
-                    "bootstrap.servers", "localhost:9092"
+                    "bootstrap.servers", "localhost:9092",
+                    "auto.offset.reset", "earliest"
                 )))
                 .serdeProperties(produce.getSerdeProperties())
                 .valueDeserializer(Property.ofValue(SerdeType.AVRO))
-//                .schemaRegistryVendor() // FIXME
+                .valueDeserializerVendor(Property.ofValue(ValueSerdeVendor.AWS_GLUE))
                 .build();
 
             RunContext runContext = runContextFactory.of();
 
-            produce.run(runContext);
-            consume.run(runContext);
+            Produce.Output produceOutput = produce.run(runContext);
+            assertThat(produceOutput.getMessagesCount(), is(1));
+            Consume.Output consumeOutput = consume.run(runContext);
+            assertThat(consumeOutput.getMessagesCount(), is(1));
 
         } finally {
             glueMock.stop();
