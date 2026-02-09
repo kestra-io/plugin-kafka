@@ -2,6 +2,7 @@ package io.kestra.plugin.kafka;
 
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
+import io.kestra.plugin.kafka.registry.ValueSerdeVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -48,6 +49,13 @@ public interface KafkaConsumerInterface {
     )
     @NotNull
     Property<SerdeType> getValueDeserializer();
+
+    @Schema(
+        title = "Value deserializer vendor.",
+        description = "Possible values are: `NONE`, `CONFLUENT`, `AWS_GLUE`."
+    )
+    @NotNull
+    Property<ValueSerdeVendor> getValueDeserializerVendor();
 
     @Schema(
         title = "Timestamp of a message to start consuming messages from.",
