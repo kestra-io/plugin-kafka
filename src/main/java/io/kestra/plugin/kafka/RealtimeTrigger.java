@@ -35,8 +35,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow on message consumption in real-time from a Kafka topic.",
-    description = "If you would like to consume multiple messages processed within a given time frame and process them in batch, you can use the [io.kestra.plugin.kafka.Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) instead."
+    title = "Start a Flow for each Kafka record",
+    description = "Consumes Kafka messages as they arrive and starts one Execution per record with manual offset commits (auto-commit disabled) and STRING deserializers by default. Configure `groupId`, `serdeProperties`, or `since` to control offsets and schema handling; use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls."
 )
 @Plugin(
     examples = {
@@ -60,8 +60,8 @@ import java.util.concurrent.atomic.AtomicReference;
                       bootstrap.servers: localhost:9092
                     serdeProperties:
                       schema.registry.url: http://localhost:8085
-                      keyDeserializer: STRING
-                      valueDeserializer: AVRO
+                    keyDeserializer: STRING
+                    valueDeserializer: AVRO
                     groupId: kafkaConsumerGroupId"""
         ),
         @Example(
@@ -138,7 +138,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Schema(
         title = "Filter messages by Kafka headers",
-        description = "Only consume messages whose headers match these conditions"
+        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
     )
     private Property<Map<String, String>> headerFilters;
 

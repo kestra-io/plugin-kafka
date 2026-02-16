@@ -52,13 +52,14 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages from one or more Kafka topics."
+    title = "Read Kafka records into internal storage",
+    description = "Consumes from configured topics or regex with manual offset commits (auto-commit disabled) and committed-only reads by default. Writes all fetched records to Kestra internal storage as ION at `uri` and returns the count. Defaults: pollDuration PT5S, STRING deserializers, Avro logical type converters enabled; use `since`, `maxRecords`, `maxDuration`, or header filters to stop early."
 )
 @Plugin(
     examples = {
         @Example(
             full = true,
-            title = "Consome data from a Kafka topic",
+            title = "Consume data from a Kafka topic",
             code = """
                 id: kafka_consume
                 namespace: company.team
@@ -166,7 +167,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @Schema(
         title = "Filter messages by Kafka headers",
-        description = "Only consume messages whose headers match these conditions"
+        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
     )
     private Property<Map<String, String>> headerFilters;
 

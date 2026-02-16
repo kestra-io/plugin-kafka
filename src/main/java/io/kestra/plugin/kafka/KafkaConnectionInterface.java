@@ -7,20 +7,17 @@ import java.util.Map;
 import jakarta.validation.constraints.NotNull;
 public interface KafkaConnectionInterface {
     @Schema(
-        title = "Kafka connection properties.",
+        title = "Kafka client properties",
         description = """
-            The `bootstrap.servers` property is a minimal required configuration to connect to a Kafka topic.
-            This property can reference any valid [Consumer Configs](https://kafka.apache.org/documentation/#consumerconfigs) or
-            [Producer Configs](https://kafka.apache.org/documentation/#producerconfigs) as key-value pairs.
-            If you want to pass a truststore or a keystore, you must provide a base64 encoded string for `ssl.keystore.location` and `ssl.truststore.location`.
+            Must include `bootstrap.servers`; accepts any Kafka [consumer](https://kafka.apache.org/documentation/#consumerconfigs) or [producer](https://kafka.apache.org/documentation/#producerconfigs) config. Provide base64-encoded content for `ssl.keystore.location` and `ssl.truststore.location` when using SSL.
             """
     )
     @NotNull
     Property<Map<String, String>> getProperties();
 
     @Schema(
-        title="Serializer configuration",
-        description = "Configuration that will be passed to serializer or deserializer. The `avro.use.logical.type.converters` is always passed when you have any values set to `true`."
+        title="Serializer or deserializer properties",
+        description = "Passed to serdes; `avro.use.logical.type.converters` is forced to true by default."
     )
     Property<Map<String, String>> getSerdeProperties();
 }

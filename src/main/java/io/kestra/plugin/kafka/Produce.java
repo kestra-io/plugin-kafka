@@ -52,9 +52,8 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Send a message to a Kafka topic.",
-    description = """
-        Message must be passed as document with keys: key, value, topic, partition, timestamp, headers."""
+    title = "Publish records to Kafka topics",
+    description = "Reads messages from `from` data (key/value/topic/partition/timestamp/headers) and sends them with configurable serializers (default STRING) and transactional sends enabled by default. Requires `bootstrap.servers`; topic can come from task config or each payload. Avro serializers need the matching schema and serdeProperties (schema.registry.url)."
 )
 @Plugin(
     examples = {
@@ -127,7 +126,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                       schema.registry.url: http://localhost:8085
                     topic: example_topic
                     valueAvroSchema: |
-                      {"type":"record","name":"twitter_schema","namespace":"io.kestra.examples","fields":[{"name":"username","type":"string"},{"name\":"tweet","type":"string"}]}
+                      {"type":"record","name":"twitter_schema","namespace":"io.kestra.examples","fields":[{"name":"username","type":"string"},{"name":"tweet","type":"string"}]}
                     valueSerializer: AVRO
                 """
         )
@@ -143,41 +142,44 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 )
 public class Produce extends AbstractKafkaConnection implements RunnableTask<Produce.Output>, Data.From {
     @Schema(
-        title = "Kafka topic to which the message should be sent.",
-        description = "Could also be passed inside the `from` property using the key `topic`."
+        title = "Target Kafka topic when not provided in payload",
+        description = "Can be overridden per record by setting `topic` inside `from`."
     )
     private Property<String> topic;
 
     private Object from;
 
     @Schema(
-        title = "The serializer used for the key.",
-        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
+        title = "Serializer used for the key",
+        description = "Default STRING. Options: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     @Builder.Default
     private Property<SerdeType> keySerializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "The serializer used for the value.",
-        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
+        title = "Serializer used for the value",
+        description = "Default STRING. Options: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     @Builder.Default
     private Property<SerdeType> valueSerializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Avro Schema if the key is set to `AVRO` type."
+        title = "Avro schema when the key serializer is AVRO",
+        description = "Required if `keySerializer` is `AVRO`."
     )
     private Property<String> keyAvroSchema;
 
     @Schema(
-        title = "Avro Schema if the value is set to `AVRO` type."
+        title = "Avro schema when the value serializer is AVRO",
+        description = "Required if `valueSerializer` is `AVRO`."
     )
     private Property<String> valueAvroSchema;
 
     @Schema(
-        title = "Whether the producer should be transactional."
+        title = "Enable transactional producer",
+        description = "Defaults to true; generates a transactional.id automatically so sends are committed atomically."
     )
     @Builder.Default
     private Property<Boolean> transactional = Property.ofValue(true);

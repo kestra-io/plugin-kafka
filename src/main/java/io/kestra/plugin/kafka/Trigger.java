@@ -23,8 +23,8 @@ import java.util.*;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow on message consumption periodically from Kafka topics.",
-    description = "Note that you don't need an extra task to consume the message from the event trigger. The trigger will automatically consume messages and you can retrieve their content in your flow using the `{{ trigger.uri }}` variable. If you would like to consume each message from a Kafka topic in real-time and create one execution per message, you can use the [io.kestra.plugin.kafka.RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) instead."
+    title = "Start a Flow on scheduled Kafka pulls",
+    description = "Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution with manual offset commits. Stores records in internal storage at `{{ trigger.uri }}`; defaults to STRING deserializers and committed-only reads. Use header filters to drop mismatching records or switch to [RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) for one-execution-per-record."
 )
 @Plugin(
     examples = {
@@ -47,8 +47,8 @@ import java.util.*;
                       bootstrap.servers: localhost:9092
                     serdeProperties:
                       schema.registry.url: http://localhost:8085
-                      keyDeserializer: STRING
-                      valueDeserializer: AVRO
+                    keyDeserializer: STRING
+                    valueDeserializer: AVRO
                     interval: PT30S
                     maxRecords: 5
                     groupId: kafkaConsumerGroupId
@@ -93,7 +93,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     @Schema(
         title = "Filter messages by Kafka headers",
-        description = "Only consume messages whose headers match these conditions"
+        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
     )
     private Property<Map<String, String>> headerFilters;
 
