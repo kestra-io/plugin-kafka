@@ -10,20 +10,20 @@ import jakarta.validation.constraints.NotNull;
 public interface ConsumeInterface extends KafkaConsumerInterface {
 
     @Schema(
-        title = "The maximum number of records to fetch before stopping the consumption process.",
-        description = "It's a soft limit evaluated every second."
+        title = "Maximum records to consume before stopping",
+        description = "Soft limit checked on each poll."
     )
     Property<Integer> getMaxRecords();
 
     @Schema(
-        title = "The maximum duration to wait for new records before stopping the consumption process.",
-        description = "It's a soft limit evaluated every second."
+        title = "Maximum duration to wait before stopping",
+        description = "Soft limit checked on each poll."
     )
     Property<Duration> getMaxDuration();
 
     @Schema(
-        title = "How often to poll for a record.",
-        description = "If no records are available, the maximum wait duration to wait for new records. "
+        title = "How often to poll for records",
+        description = "Maximum wait per poll when no records are available."
     )
     @NotNull
     Property<Duration> getPollDuration();

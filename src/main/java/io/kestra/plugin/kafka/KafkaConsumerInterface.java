@@ -12,60 +12,52 @@ import java.util.List;
 
 public interface KafkaConsumerInterface {
     @Schema(
-        title = "Kafka topic(s) to consume messages from.",
-        description = "It can be a string or a list of strings to consume from one or multiple topics."
+        title = "Kafka topic(s) to consume from",
+        description = "String or list of strings; mutually exclusive with `topicPattern`."
     )
     Object getTopic();
 
     @Schema(
-        title = "Kafka topic pattern to consume messages from.",
-        description = "Consumer will subscribe to all topics matching the specified pattern to get dynamically assigned partitions."
+        title = "Regex pattern of topics to consume from",
+        description = "Subscribes to topics matching the pattern and receives dynamic partition assignments; mutually exclusive with `topic`."
     )
     Property<String> getTopicPattern();
 
     @Schema(
-        title = "Topic partitions to consume messages from.",
-        description = "Manually assign a list of partitions to the consumer."
+        title = "Specific partitions to consume",
+        description = "Manually assign partitions; bypasses consumer group rebalancing."
     )
     Property<List<Integer>> getPartitions();
 
     @Schema(
-        title = "Kafka consumer group ID.",
-        description = "Using a consumer group, we will fetch only records that haven't been consumed yet."
+        title = "Kafka consumer group ID",
+        description = "Determines offset management; required when using `topicPattern`."
     )
     Property<String> getGroupId();
 
     @Schema(
-        title = "The deserializer used for the key.",
-        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
+        title = "Deserializer used for the key",
+        description = "Default STRING. Options: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     Property<SerdeType> getKeyDeserializer();
 
     @Schema(
-        title = "The deserializer used for the value.",
-        description = "Possible values are: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
+        title = "Deserializer used for the value",
+        description = "Default STRING. Options: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
     Property<SerdeType> getValueDeserializer();
 
     @Schema(
-        title = "Timestamp of a message to start consuming messages from.",
-        description = "By default, we consume all messages from the topics with no consumer group or depending on the " +
-            "configuration of the `auto.offset.reset` property. However, you can provide an arbitrary start time.\n" +
-            "This property is ignored if a consumer group is used.\n" +
-            "It must be a valid ISO 8601 date."
+        title = "Timestamp to start consuming from",
+        description = "ISO-8601 instant used when no consumer group offsets exist; ignored when a consumer group controls offsets."
     )
     Property<String> getSince();
 
     @Schema(
-        title = "On serde error.",
-        description = """
-    Set the behavior wanted when valueDeserializer is JSON and a serde error has occurred :
-        - SKIPPED : all invalid messages will be skipped
-        - STORE : messages will be ignored and stored as a file
-        - DLQ : messages will be ignored and sent to the DLQ specified in `topic`
-    """
+        title = "Behavior on serde error",
+        description = "Applies when valueDeserializer is JSON: `SKIPPED` (default), `STORE` to internal storage, or `DLQ` to the configured topic."
     )
     @PluginProperty
     OnSerdeError getOnSerdeError();
@@ -74,12 +66,12 @@ public interface KafkaConsumerInterface {
     @Getter
     class OnSerdeError {
 
-        @Schema(title = "Behavior in case of serde error.")
+        @Schema(title = "Action to take on serde error")
         @NotNull
         @Builder.Default
         Property<OnSerdeErrorBehavior> type = Property.ofValue(OnSerdeErrorBehavior.SKIPPED);
 
-        @Schema(title = "Topic used when DLQ has been chosen.")
+        @Schema(title = "Topic used when type is DLQ")
         Property<String> topic;
     }
 
