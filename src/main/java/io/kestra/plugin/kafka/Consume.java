@@ -1,17 +1,22 @@
 package io.kestra.plugin.kafka;
 
+import com.amazonaws.services.schemaregistry.deserializers.avro.AWSKafkaAvroDeserializer;
 import com.google.common.annotations.VisibleForTesting;
 import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.core.utils.Await;
+import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
+import io.kestra.plugin.kafka.registry.ValueSerdeVendor;
+import io.kestra.plugin.kafka.serdes.AwsGlueGenericRecordToMapDeserializer;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
@@ -21,7 +26,6 @@ import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.jetbrains.annotations.Nullable;
@@ -73,6 +77,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                       schema.registry.url: http://localhost:8085
                     keyDeserializer: STRING
                     valueDeserializer: AVRO
+                    valueDeserializerVendor: CONFLUENT
                 """
         ),
         @Example(
@@ -150,6 +155,19 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
+    @Schema(
+        title = "Schema registry vendor."
+    )
+    @PluginProperty
+    private SchemaRegistryVendor schemaRegistryVendor;
+
+    @Schema(
+        title = "Value deserializer vendor.",
+        description = "Possible values are: `NONE`, `CONFLUENT`, `AWS_GLUE`."
+    )
+    @Builder.Default
+    private Property<ValueSerdeVendor> valueDeserializerVendor = Property.ofValue(ValueSerdeVendor.NONE);
+
     private OnSerdeError onSerdeError;
 
     private Property<String> since;
@@ -172,40 +190,63 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
-        // ugly hack to force use of Kestra plugins classLoader
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
         final Properties consumerProps = createProperties(this.properties, runContext);
         final Optional<String> renderedGroupId = runContext.render(groupId).as(String.class);
+
         if (renderedGroupId.isPresent()) {
             consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, renderedGroupId.get());
         } else if (consumerProps.containsKey(ConsumerConfig.GROUP_ID_CONFIG)) {
-            // groupId can be passed from properties
             this.groupId = Property.ofValue(consumerProps.getProperty(ConsumerConfig.GROUP_ID_CONFIG));
         }
 
         if (!consumerProps.contains(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG)) {
-            // by default, we disable auto-commit
             consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         }
 
         if (!consumerProps.contains(ConsumerConfig.ISOLATION_LEVEL_CONFIG)) {
-            // by default, we only read committed offsets in case of transactions
             consumerProps.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, IsolationLevel.READ_COMMITTED.toString().toLowerCase(Locale.ROOT));
         }
 
         final Properties serdesProperties = createProperties(this.serdeProperties, runContext);
-
-        // by default, enable Avro LogicalType
         serdesProperties.put(KafkaAvroSerializerConfig.AVRO_USE_LOGICAL_TYPE_CONVERTERS_CONFIG, true);
 
-        final Deserializer keyDeserializer = getTypedDeserializer(runContext.render(this.keyDeserializer).as(SerdeType.class).orElse(SerdeType.STRING));
-        final Deserializer valDeserializer = getTypedDeserializer(runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING));
+        var keySerdeType = runContext.render(this.keyDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
+        var valueSerdeType = runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
+        var rValueDeserializerVendor = runContext.render(this.valueDeserializerVendor).as(ValueSerdeVendor.class).orElse(ValueSerdeVendor.NONE);
 
-        keyDeserializer.configure(serdesProperties, true);
-        valDeserializer.configure(serdesProperties, false);
+        var keyDeserializer = (Deserializer<Object>) getTypedDeserializer(keySerdeType);
+        var valueDeserializer = (Deserializer<Object>) getTypedDeserializer(valueSerdeType); // includes Confluent
 
-        return new KafkaConsumer<Object, Object>(consumerProps, keyDeserializer, valDeserializer);
+        if (schemaRegistryVendor != null) {
+            valueDeserializer = (Deserializer<Object>) schemaRegistryVendor.getDeserializer(runContext, valueSerdeType);
+        } else if (rValueDeserializerVendor == ValueSerdeVendor.AWS_GLUE) {
+            valueDeserializer = (Deserializer<Object>) getAwsGlueDeserializer(valueSerdeType);
+        }
+
+        var serdesMap = serdesProperties.entrySet()
+            .stream()
+            .collect(Collectors.toMap(
+                e -> String.valueOf(e.getKey()),
+                Map.Entry::getValue
+            ));
+
+        if (schemaRegistryVendor == null && rValueDeserializerVendor == ValueSerdeVendor.AWS_GLUE) {
+            enrichAwsGlueSerdeProperties(serdesMap);
+        }
+
+        keyDeserializer.configure(serdesMap, true);
+        valueDeserializer.configure(serdesMap, false);
+
+        return new KafkaConsumer<>(consumerProps, keyDeserializer, valueDeserializer);
+    }
+
+    private static Deserializer<?> getAwsGlueDeserializer(SerdeType serdeType) {
+        return switch (serdeType) {
+            case AVRO -> new AwsGlueGenericRecordToMapDeserializer(new AWSKafkaAvroDeserializer());
+            default -> throw new IllegalArgumentException("SerdeType not supported by AWS Glue: " + serdeType);
+        };
     }
 
     @Override
