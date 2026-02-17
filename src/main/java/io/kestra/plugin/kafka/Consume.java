@@ -105,7 +105,7 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
             full = true,
             title = "Consume data from a Kafka topic and write it to a JSON file",
             code = """
-                id: consume-kafka-messages
+                id: consume_kafka_messages
                 namespace: company.team
 
                 tasks:
@@ -124,6 +124,27 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                     type: io.kestra.plugin.serdes.json.IonToJson
                     newLine: true
                     from: "{{ outputs.consume.uri }}"
+                """
+        ),
+        @Example(
+            full = true,
+            title = "Consume only records whose headers match",
+            code = """
+                id: consume_with_headers
+                namespace: company.team
+
+                tasks:
+                  - id: consume_filtered
+                    type: io.kestra.plugin.kafka.Consume
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                      auto.offset.reset: earliest
+                    keyDeserializer: STRING
+                    valueDeserializer: JSON
+                    headerFilters:
+                      event-type: order_created
+                      region: us-east
                 """
         )
     },
