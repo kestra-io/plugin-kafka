@@ -54,7 +54,7 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
 
     // libs included in the final jar
-    api group: "org.apache.kafka", name: "kafka-clients"
+    api group: "org.apache.kafka", name: "kafka-clients", version: "4.2.0" // we don't want to be linked to the platform BOM here (Kestra EE uses Kafka internally)
     api group: "io.confluent", name: "kafka-schema-registry-client", version: confluentVersion
     api group: "io.confluent", name: "kafka-avro-serializer", version: confluentVersion
     api group: "io.confluent", name: "kafka-protobuf-serializer", version: confluentVersion

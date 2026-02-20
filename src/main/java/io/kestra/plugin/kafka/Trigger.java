@@ -24,7 +24,13 @@ import java.util.*;
 @NoArgsConstructor
 @Schema(
     title = "Start a Flow on scheduled Kafka pulls",
-    description = "Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution with manual offset commits. Stores records in internal storage at `{{ trigger.uri }}`; defaults to STRING deserializers and committed-only reads. Use header filters to drop mismatching records or switch to [RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) for one-execution-per-record."
+    description = """
+        Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution.
+        In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits and committed-only reads.
+        In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
+        Records are stored in internal storage at `{{ trigger.uri }}`; defaults use STRING deserializers.
+        Use header filters to drop mismatching records or switch to [RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) for one-execution-per-record.
+        """
 )
 @Plugin(
     examples = {
@@ -37,7 +43,7 @@ import java.util.*;
                 tasks:
                   - id: log
                     type: io.kestra.plugin.core.log.Log
-                    message: "{{ trigger.value }}"
+                    message: "{{ trigger.value ?? '' }}"
 
                 triggers:
                   - id: trigger
@@ -52,6 +58,29 @@ import java.util.*;
                     interval: PT30S
                     maxRecords: 5
                     groupId: kafkaConsumerGroupId
+                """
+        ),
+        @Example(
+            full = true,
+            title = "Use a Kafka share group for queue semantics",
+            code = """
+                id: kafka_trigger_share_group
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "{{ trigger.messagesCount ?? 0 }}"
+
+                triggers:
+                  - id: trigger
+                    type: io.kestra.plugin.kafka.Trigger
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    groupId: orders-share-group
+                    groupType: SHARE
+                    acknowledgeType: ACCEPT
                 """
         )
     }
@@ -73,6 +102,29 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     @NotNull
     private Property<String> groupId;
+
+    @Schema(
+        title = "Group protocol to consume with",
+        description = """
+            `CONSUMER` (default) polls with classic consumer-group behavior.
+            `SHARE` polls with Kafka share-group queue semantics and explicit acknowledgements.
+            In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
+            """
+    )
+    @Builder.Default
+    private Property<GroupType> groupType = Property.ofValue(GroupType.CONSUMER);
+
+    @Schema(
+        title = "Acknowledgement action for SHARE group type",
+        description = """
+            Used only when `groupType` is `SHARE`.
+            `ACCEPT` (default) acknowledges processed records, `RELEASE` returns records to the queue, `REJECT` negatively acknowledges records,
+            and `RENEW` extends the acquisition lock timeout for the current delivery attempt without changing record state.
+            Ignored when `groupType` is `CONSUMER`.
+            """
+    )
+    @Builder.Default
+    private Property<QueueAcknowledgeType> acknowledgeType = Property.ofValue(QueueAcknowledgeType.ACCEPT);
 
     @Builder.Default
     private Property<SerdeType> keyDeserializer = Property.ofValue(SerdeType.STRING);
@@ -97,12 +149,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     )
     private Property<Map<String, String>> headerFilters;
 
-    @Override
-    public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
-        RunContext runContext = conditionContext.getRunContext();
-        Logger logger = runContext.logger();
-
-        Consume task = Consume.builder()
+    protected Consume consumeTask() {
+        return Consume.builder()
             .id(this.id)
             .type(Consume.class.getName())
             .properties(this.properties)
@@ -111,6 +159,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .topicPattern(this.topicPattern)
             .partitions(this.partitions)
             .groupId(this.groupId)
+            .groupType(this.groupType)
+            .acknowledgeType(this.acknowledgeType)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
             .onSerdeError(this.onSerdeError)
@@ -120,6 +170,14 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .maxDuration(this.maxDuration)
             .headerFilters(this.headerFilters)
             .build();
+    }
+
+    @Override
+    public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
+        RunContext runContext = conditionContext.getRunContext();
+        Logger logger = runContext.logger();
+
+        Consume task = consumeTask();
         Consume.Output run = task.run(runContext);
 
         if (logger.isDebugEnabled()) {
