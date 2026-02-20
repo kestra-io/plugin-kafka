@@ -31,9 +31,32 @@ public interface KafkaConsumerInterface {
 
     @Schema(
         title = "Kafka consumer group ID",
-        description = "Determines offset management; required when using `topicPattern`."
+        description = "Determines offset management; required when using `topicPattern` and mandatory for `groupType: SHARE` (share group)."
     )
     Property<String> getGroupId();
+
+    @Schema(
+        title = "Group protocol to consume with",
+        description = """
+            `CONSUMER` (default) uses classic Kafka consumer groups for backward compatibility.
+            `SHARE` uses Kafka share groups (queue semantics) and requires `groupId`.
+            In `SHARE` mode, only `topic` is supported for subscription.
+            """
+    )
+    @NotNull
+    Property<GroupType> getGroupType();
+
+    @Schema(
+        title = "Acknowledgement action for SHARE group type",
+        description = """
+            Used only when `groupType` is `SHARE`.
+            `ACCEPT` marks records as processed, `RELEASE` returns records to the queue, `REJECT` negatively acknowledges records,
+            and `RENEW` extends the acquisition lock timeout for the current delivery attempt without changing record state.
+            Ignored when `groupType` is `CONSUMER`.
+            """
+    )
+    @NotNull
+    Property<QueueAcknowledgeType> getAcknowledgeType();
 
     @Schema(
         title = "Deserializer used for the key",
