@@ -44,8 +44,6 @@ import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static io.kestra.core.utils.Rethrow.throwConsumer;
-
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
@@ -53,7 +51,14 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
 @NoArgsConstructor
 @Schema(
     title = "Read Kafka records into internal storage",
-    description = "Consumes from configured topics or regex with manual offset commits (auto-commit disabled) and committed-only reads by default. Writes all fetched records to Kestra internal storage as ION at `uri` and returns the count. Defaults: pollDuration PT5S, STRING deserializers, Avro logical type converters enabled; use `since`, `maxRecords`, `maxDuration`, or header filters to stop early."
+    description = """
+        Consumes from configured topics or regex with manual offset commits (auto-commit disabled) and committed-only reads by default.
+        Writes all fetched records to Kestra internal storage as ION at `uri` and returns the count.
+        Defaults: pollDuration PT5S, STRING deserializers, Avro logical type converters enabled.
+        Use `groupType: CONSUMER` (default, backward compatible) for classic consumer groups, or `groupType: SHARE` for queue semantics with share groups and explicit acknowledgements.
+        In `SHARE` mode, `topic` and `groupId` are required, and `topicPattern`, `partitions`, and `since` are not supported.
+        Use `since`, `maxRecords`, `maxDuration`, or header filters to stop early.
+        """
 )
 @Plugin(
     examples = {
@@ -146,6 +151,26 @@ import static io.kestra.core.utils.Rethrow.throwConsumer;
                       event-type: order_created
                       region: us-east
                 """
+        ),
+        @Example(
+            full = true,
+            title = "Consume queue-style with Kafka share groups",
+            code = """
+                id: consume_kafka_share_group
+                namespace: company.team
+
+                tasks:
+                  - id: consume_queue
+                    type: io.kestra.plugin.kafka.Consume
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    groupId: orders-share-group
+                    groupType: SHARE
+                    acknowledgeType: ACCEPT
+                    keyDeserializer: STRING
+                    valueDeserializer: JSON
+                """
         )
     },
     metrics = {
@@ -165,6 +190,29 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Property<List<Integer>> partitions;
 
     private Property<String> groupId;
+
+    @Schema(
+        title = "Group protocol to consume with",
+        description = """
+            `CONSUMER` (default) keeps backward-compatible Kafka consumer-group behavior.
+            `SHARE` enables Kafka share-group queue semantics with explicit acknowledgements.
+            In `SHARE` mode, `groupId` and `topic` are required, and `topicPattern`, `partitions`, and `since` are not supported.
+            """
+    )
+    @Builder.Default
+    private Property<GroupType> groupType = Property.ofValue(GroupType.CONSUMER);
+
+    @Schema(
+        title = "Acknowledgement action for SHARE group type",
+        description = """
+            Used only when `groupType` is `SHARE`.
+            `ACCEPT` (default) marks a record as processed, `RELEASE` returns it to the queue, `REJECT` negatively acknowledges it,
+            and `RENEW` extends the acquisition lock timeout for the current delivery attempt without changing record state.
+            Ignored when `groupType` is `CONSUMER`.
+            """
+    )
+    @Builder.Default
+    private Property<QueueAcknowledgeType> acknowledgeType = Property.ofValue(QueueAcknowledgeType.ACCEPT);
 
     @Builder.Default
     private Property<SerdeType> keyDeserializer = Property.ofValue(SerdeType.STRING);
@@ -230,46 +278,88 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         return new KafkaConsumer<Object, Object>(consumerProps, keyDeserializer, valDeserializer);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public ShareConsumer<Object, Object> shareConsumer(RunContext runContext) throws Exception {
+        // ugly hack to force use of Kestra plugins classLoader
+        Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
+
+        final var consumerProps = createProperties(this.properties, runContext);
+        final var rGroupId = runContext.render(groupId).as(String.class);
+        rGroupId.ifPresent(value -> consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, value));
+
+        if (!consumerProps.containsKey(ConsumerConfig.GROUP_ID_CONFIG)) {
+            throw new IllegalArgumentException(
+                "Invalid Configuration: You must configure `groupId` or set `group.id` in `properties` when `groupType` is `SHARE`."
+            );
+        }
+
+        if (!consumerProps.containsKey(ConsumerConfig.SHARE_ACKNOWLEDGEMENT_MODE_CONFIG)) {
+            consumerProps.put(ConsumerConfig.SHARE_ACKNOWLEDGEMENT_MODE_CONFIG, "explicit");
+        }
+
+        final var serdesProperties = createProperties(this.serdeProperties, runContext);
+        serdesProperties.put(KafkaAvroSerializerConfig.AVRO_USE_LOGICAL_TYPE_CONVERTERS_CONFIG, true);
+
+        final Deserializer keyDeserializer = getTypedDeserializer(runContext.render(this.keyDeserializer).as(SerdeType.class).orElse(SerdeType.STRING));
+        final Deserializer valDeserializer = getTypedDeserializer(runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING));
+
+        keyDeserializer.configure(serdesProperties, true);
+        valDeserializer.configure(serdesProperties, false);
+
+        return new KafkaShareConsumer<Object, Object>(consumerProps, keyDeserializer, valDeserializer);
+    }
+
+    GroupType resolveGroupType(RunContext runContext) throws IllegalVariableEvaluationException {
+        return runContext.render(this.groupType).as(GroupType.class).orElse(GroupType.CONSUMER);
+    }
+
+    QueueAcknowledgeType resolveAcknowledgeType(RunContext runContext) throws IllegalVariableEvaluationException {
+        return runContext.render(this.acknowledgeType).as(QueueAcknowledgeType.class).orElse(QueueAcknowledgeType.ACCEPT);
+    }
+
     @Override
     public Output run(RunContext runContext) throws Exception {
-        File tempFile = runContext.workingDir().createTempFile(".ion").toFile();
+        var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
+        try {
+            if (resolveGroupType(runContext) == GroupType.SHARE) {
+                return runWithShareConsumer(runContext, tempFile);
+            }
+            return runWithConsumer(runContext, tempFile);
+        } catch (KafkaException e) {
+            return handleSerdeError(runContext, tempFile, e);
+        }
+    }
+
+    private Output runWithConsumer(RunContext runContext, File tempFile) throws Exception {
         try (
-            BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile));
-            KafkaConsumer<Object, Object> consumer = this.consumer(runContext)
+            var output = new BufferedOutputStream(new FileOutputStream(tempFile));
+            var consumer = this.consumer(runContext)
         ) {
             this.subscription = topicSubscription(runContext);
             this.subscription.subscribe(runContext, consumer, this);
 
-            Map<String, Integer> count = new HashMap<>();
-            AtomicInteger total = new AtomicInteger();
-            ZonedDateTime started = ZonedDateTime.now();
+            var count = new HashMap<String, Integer>();
+            var total = new AtomicInteger();
+            var started = ZonedDateTime.now();
             ConsumerRecords<Object, Object> records;
             boolean empty;
 
             do {
                 records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
                 empty = records.isEmpty();
-
-                records.forEach(throwConsumer(consumerRecord -> {
-                    if (!matchHeaders(consumerRecord.headers(), runContext.render(headerFilters).asMap(String.class, String.class))) {
-                        return;
-                    }
-
+                total.addAndGet(processConsumerRecords(runContext, records, consumerRecord -> {
                     FileSerde.write(output, this.recordToMessage(consumerRecord));
-
-                    total.getAndIncrement();
                     count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
                 }));
             }
             while (!this.ended(runContext, empty, total, started));
 
-            // Flush, and write data to Kestra's internal storage
             output.flush();
-            URI uri = runContext.storage().putFile(tempFile);
+            var uri = runContext.storage().putFile(tempFile);
 
-            // Important - always commit the consumer offsets after
-            // records are fully written to Kestra's internal storage
             if (this.groupId != null) {
+                // Important - always commit the consumer offsets after
+                // records are fully written to Kestra's internal storage
                 consumer.commitSync();
             }
 
@@ -279,40 +369,122 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
                 .uri(uri)
                 .build();
-        } catch (KafkaException e) {
-            if (onSerdeError == null || !(e.getCause() instanceof PluginKafkaSerdeException)) {
-                throw e;
-            }
-
-            PluginKafkaSerdeException err = (PluginKafkaSerdeException) e.getCause();
-            OnSerdeErrorBehavior onSerdeErrorBehavior = runContext.render(this.onSerdeError.getType()).as(OnSerdeErrorBehavior.class).orElseThrow();
-            runContext.logger().warn("Skipping consume on serde error: '{}'", e.getMessage());
-
-            switch (onSerdeErrorBehavior) {
-                case SKIPPED -> {
-                    return Output.builder().build();
-                }
-                case STORE -> {
-                    Files.writeString(tempFile.toPath(), err.getData(), StandardCharsets.UTF_8);
-                    return Output.builder()
-                        .uri(runContext.storage().putFile(tempFile))
-                        .build();
-                }
-                case DLQ -> {
-                    Produce.builder()
-                        .topic(onSerdeError.getTopic())
-                        .properties(this.getProperties())
-                        .serdeProperties(this.getSerdeProperties())
-                        .keySerializer(this.getKeyDeserializer())
-                        .valueSerializer(this.getValueDeserializer())
-                        .from(err.getData())
-                        .build()
-                        .run(runContext);
-                    return Output.builder().build();
-                }
-            }
         }
-        return null;
+    }
+
+    private Output runWithShareConsumer(RunContext runContext, File tempFile) throws Exception {
+        validateShareConfiguration();
+        try (
+            var output = new BufferedOutputStream(new FileOutputStream(tempFile));
+            var consumer = this.shareConsumer(runContext)
+        ) {
+            shareSubscribe(runContext, consumer);
+
+            var count = new HashMap<String, Integer>();
+            var total = new AtomicInteger();
+            var started = ZonedDateTime.now();
+            ConsumerRecords<Object, Object> records;
+            boolean empty;
+
+            do {
+                records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
+                empty = records.isEmpty();
+                total.addAndGet(processShareConsumerRecords(runContext, consumer, records, consumerRecord -> {
+                    FileSerde.write(output, this.recordToMessage(consumerRecord));
+                    count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
+                }));
+            }
+            while (!this.ended(runContext, empty, total, started));
+
+            output.flush();
+            var uri = runContext.storage().putFile(tempFile);
+            // Important - always commit the consumer offsets after
+            // records are fully written to Kestra's internal storage
+            consumer.commitSync();
+
+            count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
+
+            return Output.builder()
+                .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
+                .uri(uri)
+                .build();
+        }
+    }
+
+    private Output handleSerdeError(RunContext runContext, File tempFile, KafkaException e) throws Exception {
+        if (onSerdeError == null || !(e.getCause() instanceof PluginKafkaSerdeException err)) {
+            throw e;
+        }
+
+        var onSerdeErrorBehavior = runContext.render(this.onSerdeError.getType()).as(OnSerdeErrorBehavior.class).orElseThrow();
+        runContext.logger().warn("Skipping consume on serde error: '{}'", e.getMessage());
+
+        return switch (onSerdeErrorBehavior) {
+            case SKIPPED -> Output.builder().build();
+            case STORE -> {
+                Files.writeString(tempFile.toPath(), err.getData(), StandardCharsets.UTF_8);
+                yield Output.builder()
+                    .uri(runContext.storage().putFile(tempFile))
+                    .build();
+            }
+            case DLQ -> {
+                Produce.builder()
+                    .topic(onSerdeError.getTopic())
+                    .properties(this.getProperties())
+                    .serdeProperties(this.getSerdeProperties())
+                    .keySerializer(this.getKeyDeserializer())
+                    .valueSerializer(this.getValueDeserializer())
+                    .from(err.getData())
+                    .build()
+                    .run(runContext);
+                yield Output.builder().build();
+            }
+        };
+    }
+
+    int processConsumerRecords(RunContext runContext,
+                               ConsumerRecords<Object, Object> records,
+                               RecordHandler onMatchingRecord) throws Exception {
+        var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
+        var matchedCount = 0;
+
+        for (var consumerRecord : records) {
+            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)) {
+                continue;
+            }
+
+            onMatchingRecord.accept(consumerRecord);
+            matchedCount++;
+        }
+
+        return matchedCount;
+    }
+
+    int processShareConsumerRecords(RunContext runContext,
+                                    ShareConsumer<Object, Object> consumer,
+                                    ConsumerRecords<Object, Object> records,
+                                    RecordHandler onMatchingRecord) throws Exception {
+        var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
+        var rAcknowledgeType = resolveAcknowledgeType(runContext).toKafkaType();
+        var matchedCount = 0;
+
+        for (var consumerRecord : records) {
+            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)) {
+                consumer.acknowledge(consumerRecord, AcknowledgeType.ACCEPT);
+                continue;
+            }
+
+            onMatchingRecord.accept(consumerRecord);
+            consumer.acknowledge(consumerRecord, rAcknowledgeType);
+            matchedCount++;
+        }
+
+        return matchedCount;
+    }
+
+    @FunctionalInterface
+    interface RecordHandler {
+        void accept(ConsumerRecord<Object, Object> consumerRecord) throws Exception;
     }
 
     public Message recordToMessage(ConsumerRecord<Object, Object> consumerRecord) {
@@ -362,6 +534,29 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             }
         }
         return true;
+    }
+
+    public void shareSubscribe(RunContext runContext, ShareConsumer<Object, Object> consumer) throws IllegalVariableEvaluationException {
+        consumer.subscribe(evaluateTopics(runContext));
+    }
+
+    @VisibleForTesting
+    void validateShareConfiguration() {
+        if (this.topic == null) {
+            throw new IllegalArgumentException("Invalid Configuration: You must configure `topic` when `groupType` is `SHARE`.");
+        }
+
+        if (this.topicPattern != null) {
+            throw new IllegalArgumentException("Invalid Configuration: `topicPattern` is not supported when `groupType` is `SHARE`.");
+        }
+
+        if (this.partitions != null) {
+            throw new IllegalArgumentException("Invalid Configuration: `partitions` is not supported when `groupType` is `SHARE`.");
+        }
+
+        if (this.since != null) {
+            throw new IllegalArgumentException("Invalid Configuration: `since` is not supported when `groupType` is `SHARE`.");
+        }
     }
 
 

@@ -53,7 +53,12 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 @NoArgsConstructor
 @Schema(
     title = "Publish records to Kafka topics",
-    description = "Reads messages from `from` data (key/value/topic/partition/timestamp/headers) and sends them with configurable serializers (default STRING) and transactional sends enabled by default. Requires `bootstrap.servers`; topic can come from task config or each payload. Avro serializers need the matching schema and serdeProperties (schema.registry.url)."
+    description = """
+        Reads messages from `from` data (key/value/topic/partition/timestamp/headers) and sends them with configurable serializers (default STRING) and transactional sends enabled by default.
+        Requires `bootstrap.servers`; topic can come from task config or each payload.
+        Avro serializers require the matching schema (`keyAvroSchema` / `valueAvroSchema`) and `serdeProperties` (for example `schema.registry.url`).
+        Produced records can be consumed by both classic consumer groups (`groupType: CONSUMER`) and share groups (`groupType: SHARE`) in Kafka consume and trigger tasks.
+        """
 )
 @Plugin(
     examples = {

@@ -1,8 +1,8 @@
 group: io.kestra.plugin.kafka
 name: "kafka"
 title: "Apache Kafka"
-description: "Tasks that produce, consume, and trigger workflows from Apache Kafka topics."
-body: "Set bootstrap servers, topic names, and serializers along with security settings (SASL/SSL) to publish messages, poll or stream consumes, and use triggers to start flows on new records with offsets and consumer group controls."
+description: "Tasks that produce, consume, and trigger workflows from Apache Kafka topics, including share-group queue semantics."
+body: "Set bootstrap servers, topic names, and serializers along with security settings (SASL/SSL) to publish messages, poll or stream consumes, and use triggers to start flows on new records. Consume and trigger tasks support both classic consumer groups and share groups for queue-style processing."
 videos: []
 createdBy: "Kestra Core Team"
 managedBy: "Kestra Core Team"

@@ -1,6 +1,6 @@
 services:
   kafka:
-    image: confluentinc/cp-kafka:7.5.0 # AK 3.5.x
+    image: confluentinc/cp-kafka:8.1.1 # AK 4.1.x
     environment:
       KAFKA_NODE_ID: 101
       # random cluster ID used for formatting LOG_DIR for KRaft
@@ -13,6 +13,11 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      # Enable SHARE in the broker group coordinator protocols so share groups can fetch records.
+      KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer,share,streams'
+      KAFKA_GROUP_SHARE_ENABLE: 'true'
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -20,11 +25,11 @@ services:
       CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
       CONFLUENT_METRICS_ENABLE: 'false'
     ports:
-      - 9092:9092
+      - "9092:9092"
     restart: on-failure
 
   schema-registry:
-    image: confluentinc/cp-schema-registry:7.5.0
+    image: confluentinc/cp-schema-registry:8.1.1 # AK 4.1.x
     depends_on:
       - kafka
     environment:
@@ -33,4 +38,4 @@ services:
       SCHEMA_REGISTRY_LISTENERS: 'http://0.0.0.0:8085'
       SCHEMA_REGISTRY_LOG4J_ROOT_LOGLEVEL: 'INFO'
     ports:
-      - 8085:8085
+      - "8085:8085"

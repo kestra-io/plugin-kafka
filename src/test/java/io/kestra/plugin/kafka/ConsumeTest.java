@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -223,5 +224,48 @@ class ConsumeTest {
         );
 
         Assertions.assertFalse(task.matchHeaders(headers, filters));
+    }
+
+    @Test
+    void shouldThrowGivenShareGroupTypeWithTopicPattern() {
+        Consume task = Consume.builder()
+            .groupType(Property.ofValue(GroupType.SHARE))
+            .topicPattern(Property.ofValue(".*"))
+            .build();
+
+        Assertions.assertThrows(IllegalArgumentException.class, task::validateShareConfiguration);
+    }
+
+    @Test
+    void shouldThrowGivenShareGroupTypeWithPartitions() {
+        Consume task = Consume.builder()
+            .groupType(Property.ofValue(GroupType.SHARE))
+            .topic("orders")
+            .partitions(Property.ofValue(List.of(0)))
+            .build();
+
+        Assertions.assertThrows(IllegalArgumentException.class, task::validateShareConfiguration);
+    }
+
+    @Test
+    void shouldMapShareAcknowledgeType() {
+        Assertions.assertEquals(org.apache.kafka.clients.consumer.AcknowledgeType.ACCEPT, QueueAcknowledgeType.ACCEPT.toKafkaType());
+        Assertions.assertEquals(org.apache.kafka.clients.consumer.AcknowledgeType.RELEASE, QueueAcknowledgeType.RELEASE.toKafkaType());
+        Assertions.assertEquals(org.apache.kafka.clients.consumer.AcknowledgeType.REJECT, QueueAcknowledgeType.REJECT.toKafkaType());
+    }
+
+    @Test
+    void shouldMapOrFailGracefullyGivenRenewAcknowledgeType() {
+        var kafkaAcknowledgeTypeNames = Arrays.stream(org.apache.kafka.clients.consumer.AcknowledgeType.values())
+            .map(Enum::name)
+            .toList();
+
+        if (kafkaAcknowledgeTypeNames.contains("RENEW")) {
+            Assertions.assertEquals(org.apache.kafka.clients.consumer.AcknowledgeType.valueOf("RENEW"), QueueAcknowledgeType.RENEW.toKafkaType());
+            return;
+        }
+
+        var exception = Assertions.assertThrows(IllegalStateException.class, () -> QueueAcknowledgeType.RENEW.toKafkaType());
+        Assertions.assertTrue(exception.getMessage().contains("not supported"));
     }
 }
