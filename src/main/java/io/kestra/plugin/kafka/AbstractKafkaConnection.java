@@ -4,6 +4,8 @@ import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
@@ -72,6 +74,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
             case VOID -> new VoidSerializer();
             case AVRO -> new MapToGenericRecordSerializer(new KafkaAvroSerializer(), avroSchema);
             case JSON -> new KafkaJsonSerializer<>();
+            case PROTOBUF -> new KafkaProtobufSerializer<>();
         };
     }
 
@@ -99,7 +102,102 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
                     }
                 }
             };
+            case PROTOBUF -> new KafkaProtobufDeserializer<>();
         };
+    }
+
+    protected static void enrichAwsGlueSerdeProperties(Map<String, Object> serdeProperties) {
+        if (!serdeProperties.containsKey("endpoint") && serdeProperties.containsKey("schema.registry.url")) {
+            serdeProperties.put("endpoint", serdeProperties.get("schema.registry.url"));
+        }
+
+        if (!serdeProperties.containsKey("schema.registry.url") && serdeProperties.containsKey("endpoint")) {
+            serdeProperties.put("schema.registry.url", serdeProperties.get("endpoint"));
+        }
+
+        // Backward compatibility with existing AWS-prefixed keys.
+        if (!serdeProperties.containsKey("endpoint") && serdeProperties.containsKey("aws.glue.endpoint")) {
+            serdeProperties.put("endpoint", serdeProperties.get("aws.glue.endpoint"));
+        }
+
+        if (!serdeProperties.containsKey("aws.glue.endpoint") && serdeProperties.containsKey("endpoint")) {
+            serdeProperties.put("aws.glue.endpoint", serdeProperties.get("endpoint"));
+        }
+
+        if (!serdeProperties.containsKey("region") && serdeProperties.containsKey("aws.region")) {
+            serdeProperties.put("region", serdeProperties.get("aws.region"));
+        }
+
+        if (!serdeProperties.containsKey("aws.region") && serdeProperties.containsKey("region")) {
+            serdeProperties.put("aws.region", serdeProperties.get("region"));
+        }
+
+        var awsRegion = resolveAwsConfigValue("aws.region", "AWS_REGION");
+        awsRegion.ifPresent(value -> {
+            serdeProperties.putIfAbsent("aws.region", value);
+            serdeProperties.putIfAbsent("region", value);
+            System.setProperty("aws.region", value);
+        });
+
+        var awsEndpoint = resolveAwsConfigValue("aws.glue.endpoint", "AWS_GLUE_ENDPOINT");
+        awsEndpoint.ifPresent(value -> {
+            serdeProperties.putIfAbsent("aws.glue.endpoint", value);
+            serdeProperties.putIfAbsent("endpoint", value);
+        });
+
+        if (!serdeProperties.containsKey("aws.accessKeyId") && serdeProperties.containsKey("aws.access.key.id")) {
+            serdeProperties.put("aws.accessKeyId", serdeProperties.get("aws.access.key.id"));
+        }
+
+        if (!serdeProperties.containsKey("aws.access.key.id") && serdeProperties.containsKey("aws.accessKeyId")) {
+            serdeProperties.put("aws.access.key.id", serdeProperties.get("aws.accessKeyId"));
+        }
+
+        var awsAccessKeyId = resolveAwsConfigValue("aws.accessKeyId", "AWS_ACCESS_KEY_ID")
+            .or(() -> resolveAwsConfigValue("aws.access.key.id", "AWS_ACCESS_KEY_ID"));
+        awsAccessKeyId.ifPresent(value -> {
+            serdeProperties.putIfAbsent("aws.accessKeyId", value);
+            serdeProperties.putIfAbsent("aws.access.key.id", value);
+            System.setProperty("aws.accessKeyId", value);
+        });
+
+        if (!serdeProperties.containsKey("aws.secretAccessKey") && serdeProperties.containsKey("aws.secret.access.key")) {
+            serdeProperties.put("aws.secretAccessKey", serdeProperties.get("aws.secret.access.key"));
+        }
+
+        if (!serdeProperties.containsKey("aws.secret.access.key") && serdeProperties.containsKey("aws.secretAccessKey")) {
+            serdeProperties.put("aws.secret.access.key", serdeProperties.get("aws.secretAccessKey"));
+        }
+
+        var awsSecretAccessKey = resolveAwsConfigValue("aws.secretAccessKey", "AWS_SECRET_ACCESS_KEY")
+            .or(() -> resolveAwsConfigValue("aws.secret.access.key", "AWS_SECRET_ACCESS_KEY"));
+        awsSecretAccessKey.ifPresent(value -> {
+            serdeProperties.putIfAbsent("aws.secretAccessKey", value);
+            serdeProperties.putIfAbsent("aws.secret.access.key", value);
+            System.setProperty("aws.secretAccessKey", value);
+        });
+
+        // Required by AWS Kafka Avro deserializer for generic records.
+        serdeProperties.putIfAbsent("avroRecordType", "GENERIC_RECORD");
+    }
+
+    private static Optional<String> resolveAwsConfigValue(String propertyName, String environmentVariableName) {
+        var systemProperty = System.getProperty(propertyName);
+        if (systemProperty != null && !systemProperty.isBlank()) {
+            return Optional.of(systemProperty);
+        }
+
+        var systemEnvironmentValue = System.getenv(environmentVariableName);
+        if (systemEnvironmentValue != null && !systemEnvironmentValue.isBlank()) {
+            return Optional.of(systemEnvironmentValue);
+        }
+
+        var uppercaseSystemProperty = System.getProperty(environmentVariableName);
+        if (uppercaseSystemProperty != null && !uppercaseSystemProperty.isBlank()) {
+            return Optional.of(uppercaseSystemProperty);
+        }
+
+        return Optional.empty();
     }
 
     @Getter

@@ -7,6 +7,7 @@ import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.*;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.registry.ValueSerdeVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -132,6 +133,9 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     @Builder.Default
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
+    @Builder.Default
+    private Property<ValueSerdeVendor> valueDeserializerVendor = Property.ofValue(ValueSerdeVendor.NONE);
+
     private OnSerdeError onSerdeError;
 
     private Property<String> since;
@@ -163,6 +167,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .acknowledgeType(this.acknowledgeType)
             .keyDeserializer(this.keyDeserializer)
             .valueDeserializer(this.valueDeserializer)
+            .valueDeserializerVendor(this.valueDeserializerVendor)
             .onSerdeError(this.onSerdeError)
             .since(this.since)
             .pollDuration(this.pollDuration)
