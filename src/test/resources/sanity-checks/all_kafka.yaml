@@ -1,0 +1,113 @@
+id: all_kafka
+namespace: sanitychecks.plugin-kafka
+
+tasks:
+  - id: init
+    type: io.kestra.plugin.core.output.OutputValues
+    values:
+      port: "{{ randomPort() }}"
+
+  - id: docker_start
+    type: io.kestra.plugin.docker.Run
+    containerImage: confluentinc/cp-kafka:8.1.1
+    env:
+      KAFKA_NODE_ID: "101"
+      CLUSTER_ID: "xtzWWN4bTjitpL3kfd9s5g"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "101@localhost:29093"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_JMX_PORT: "9991"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:{{ outputs.init.values.port }},CONTROLLER://localhost:29093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:29093"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: "classic,consumer,share,streams"
+      KAFKA_GROUP_SHARE_ENABLE: "true"
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      CONFLUENT_METRICS_ENABLE: "false"
+    portBindings:
+      - "{{ outputs.init.values.port }}:9092"
+    wait: false
+
+  - id: wait_kafka
+    type: io.kestra.plugin.core.flow.Sleep
+    duration: PT20S
+
+  - id: produce_classic
+    type: io.kestra.plugin.kafka.Produce
+    topic: "sanity.classic.{{ execution.id }}"
+    properties:
+      bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
+    keySerializer: STRING
+    valueSerializer: STRING
+    transactional: false
+    from:
+      - key: alpha
+        value: hello kafka
+        headers:
+          match: "yes"
+          sequence: "1"
+      - key: beta
+        value: skip me
+        headers:
+          match: "no"
+          sequence: "2"
+      - key: gamma
+        value: hello again
+        headers:
+          match: "yes"
+          sequence: "3"
+
+  - id: wait_classic_messages
+    type: io.kestra.plugin.core.flow.Sleep
+    duration: PT5S
+
+  - id: consume_all
+    type: io.kestra.plugin.kafka.Consume
+    topic: "sanity.classic.{{ execution.id }}"
+    groupId: "classic-all-{{ execution.id }}"
+    properties:
+      bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
+      auto.offset.reset: earliest
+      max.poll.records: "10"
+    keyDeserializer: STRING
+    valueDeserializer: STRING
+    pollDuration: PT5S
+    maxRecords: 3
+
+  - id: consume_filtered
+    type: io.kestra.plugin.kafka.Consume
+    topic: "sanity.classic.{{ execution.id }}"
+    groupId: "classic-filtered-{{ execution.id }}"
+    properties:
+      bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
+      auto.offset.reset: earliest
+      max.poll.records: "10"
+    keyDeserializer: STRING
+    valueDeserializer: STRING
+    pollDuration: PT5S
+    maxRecords: 2
+    headerFilters:
+      match: "yes"
+
+  - id: assert
+    type: io.kestra.plugin.core.execution.Assert
+    conditions:
+      - "{{ outputs.produce_classic.messagesCount == 3 }}"
+      - "{{ outputs.consume_all.messagesCount == 3 }}"
+      - "{{ fromIon(read(outputs.consume_all.uri), allRows=true) | length == 3 }}"
+      - "{{ outputs.consume_filtered.messagesCount == 2 }}"
+      - "{{ fromIon(read(outputs.consume_filtered.uri), allRows=true) | length == 2 }}"
+
+finally:
+  - id: purge
+    type: io.kestra.plugin.core.storage.PurgeCurrentExecutionFiles
+
+  - id: docker_stop
+    type: io.kestra.plugin.docker.Stop
+    containerId: "{{ outputs.docker_start.taskRunner.containerId }}"
+    kill: true
