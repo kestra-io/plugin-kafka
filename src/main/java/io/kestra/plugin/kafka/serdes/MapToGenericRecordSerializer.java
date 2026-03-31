@@ -13,10 +13,14 @@ import org.apache.kafka.common.serialization.Serializer;
 
 public class MapToGenericRecordSerializer implements Serializer<Object> {
 
-    private final KafkaAvroSerializer serializer;
-    private final AvroSchema schema;
+    private final Serializer<Object> serializer;
+    private final Schema schema;
 
     public MapToGenericRecordSerializer(KafkaAvroSerializer serializer, AvroSchema schema) {
+        this(serializer, schema.rawSchema());
+    }
+
+    public MapToGenericRecordSerializer(Serializer<Object> serializer, Schema schema) {
         this.serializer = serializer;
         this.schema = schema;
     }
@@ -28,7 +32,7 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
 
     @Override
     public byte[] serialize(String topic, Object data) {
-        return serializer.serialize(topic, buildValue(schema.rawSchema(), data));
+        return serializer.serialize(topic, buildValue(schema, data));
     }
 
     @Override
@@ -42,7 +46,7 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
         }
         return switch (schema.getType()) {
             case UNION -> buildUnionValue(schema, data);
-            case RECORD -> buildRecordValue(schema, (Map<String, ?>) data);
+            case RECORD -> data instanceof GenericRecord genericRecord ? genericRecord : buildRecordValue(schema, (Map<String, ?>) data);
             case MAP -> buildMapValue(schema, (Map<String, ?>) data);
             case ARRAY -> buildArrayValue(schema, (Collection<?>) data);
             case ENUM -> buildEnumValue(schema, (String) data);
