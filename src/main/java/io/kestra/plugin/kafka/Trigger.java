@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.*;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -112,6 +113,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             """
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<GroupType> groupType = Property.ofValue(GroupType.CONSUMER);
 
     @Schema(
@@ -124,6 +126,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             """
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<QueueAcknowledgeType> acknowledgeType = Property.ofValue(QueueAcknowledgeType.ACCEPT);
 
     @Builder.Default
@@ -147,6 +150,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
         title = "Filter messages by Kafka headers",
         description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
     )
+    @PluginProperty(group = "advanced")
     private Property<Map<String, String>> headerFilters;
 
     protected Consume consumeTask() {

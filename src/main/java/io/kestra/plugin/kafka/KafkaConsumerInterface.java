@@ -15,24 +15,28 @@ public interface KafkaConsumerInterface {
         title = "Kafka topic(s) to consume from",
         description = "String or list of strings; mutually exclusive with `topicPattern`."
     )
+    @PluginProperty(group = "advanced")
     Object getTopic();
 
     @Schema(
         title = "Regex pattern of topics to consume from",
         description = "Subscribes to topics matching the pattern and receives dynamic partition assignments; mutually exclusive with `topic`."
     )
+    @PluginProperty(group = "advanced")
     Property<String> getTopicPattern();
 
     @Schema(
         title = "Specific partitions to consume",
         description = "Manually assign partitions; bypasses consumer group rebalancing."
     )
+    @PluginProperty(group = "advanced")
     Property<List<Integer>> getPartitions();
 
     @Schema(
         title = "Kafka consumer group ID",
         description = "Determines offset management; required when using `topicPattern` and mandatory for `groupType: SHARE` (share group)."
     )
+    @PluginProperty(group = "advanced")
     Property<String> getGroupId();
 
     @Schema(
@@ -44,6 +48,7 @@ public interface KafkaConsumerInterface {
             """
     )
     @NotNull
+    @PluginProperty(group = "main")
     Property<GroupType> getGroupType();
 
     @Schema(
@@ -56,6 +61,7 @@ public interface KafkaConsumerInterface {
             """
     )
     @NotNull
+    @PluginProperty(group = "main")
     Property<QueueAcknowledgeType> getAcknowledgeType();
 
     @Schema(
@@ -63,6 +69,7 @@ public interface KafkaConsumerInterface {
         description = "Default STRING. Options: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
+    @PluginProperty(group = "main")
     Property<SerdeType> getKeyDeserializer();
 
     @Schema(
@@ -70,19 +77,21 @@ public interface KafkaConsumerInterface {
         description = "Default STRING. Options: `STRING`, `INTEGER`, `FLOAT`, `DOUBLE`, `LONG`, `SHORT`, `BYTE_ARRAY`, `BYTE_BUFFER`, `BYTES`, `UUID`, `VOID`, `AVRO`, `JSON`."
     )
     @NotNull
+    @PluginProperty(group = "main")
     Property<SerdeType> getValueDeserializer();
 
     @Schema(
         title = "Timestamp to start consuming from",
         description = "ISO-8601 instant used when no consumer group offsets exist; ignored when a consumer group controls offsets."
     )
+    @PluginProperty(group = "advanced")
     Property<String> getSince();
 
     @Schema(
         title = "Behavior on serde error",
         description = "Applies when valueDeserializer is JSON: `SKIPPED` (default), `STORE` to internal storage, or `DLQ` to the configured topic."
     )
-    @PluginProperty
+    @PluginProperty(group = "advanced")
     OnSerdeError getOnSerdeError();
 
     @Builder

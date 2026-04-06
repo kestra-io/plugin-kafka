@@ -30,6 +30,7 @@ import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -155,6 +156,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             """
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<GroupType> groupType = Property.ofValue(GroupType.CONSUMER);
 
     @Schema(
@@ -167,6 +169,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             """
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<QueueAcknowledgeType> acknowledgeType = Property.ofValue(QueueAcknowledgeType.ACCEPT);
 
     @Builder.Default
@@ -199,6 +202,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         title = "Filter messages by Kafka headers",
         description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
     )
+    @PluginProperty(group = "advanced")
     private Property<Map<String, String>> headerFilters;
 
     protected Consume consumeTask() {

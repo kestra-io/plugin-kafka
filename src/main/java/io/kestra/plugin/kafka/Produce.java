@@ -45,6 +45,7 @@ import java.util.stream.Collectors;
 import jakarta.validation.constraints.NotNull;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -150,8 +151,10 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         title = "Target Kafka topic when not provided in payload",
         description = "Can be overridden per record by setting `topic` inside `from`."
     )
+    @PluginProperty(group = "destination")
     private Property<String> topic;
 
+    @PluginProperty(group = "source")
     private Object from;
 
     @Schema(
@@ -160,6 +163,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     )
     @NotNull
     @Builder.Default
+    @PluginProperty(group = "connection")
     private Property<SerdeType> keySerializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
@@ -168,18 +172,21 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     )
     @NotNull
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<SerdeType> valueSerializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
         title = "Avro schema when the key serializer is AVRO",
         description = "Required if `keySerializer` is `AVRO`."
     )
+    @PluginProperty(group = "connection")
     private Property<String> keyAvroSchema;
 
     @Schema(
         title = "Avro schema when the value serializer is AVRO",
         description = "Required if `valueSerializer` is `AVRO`."
     )
+    @PluginProperty(group = "connection")
     private Property<String> valueAvroSchema;
 
     @Schema(
@@ -187,6 +194,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         description = "Defaults to true; generates a transactional.id automatically so sends are committed atomically."
     )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<Boolean> transactional = Property.ofValue(true);
 
     @Builder.Default
