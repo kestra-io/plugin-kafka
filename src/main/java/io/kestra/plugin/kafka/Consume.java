@@ -43,6 +43,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import io.kestra.core.models.annotations.PluginProperty;
 
 @SuperBuilder
 @ToString
@@ -183,12 +184,16 @@ import java.util.stream.StreamSupport;
     }
 )
 public class Consume extends AbstractKafkaConnection implements RunnableTask<Consume.Output>, ConsumeInterface {
+    @PluginProperty(group = "destination")
     private Object topic;
 
+    @PluginProperty(group = "destination")
     private Property<String> topicPattern;
 
+    @PluginProperty(group = "advanced")
     private Property<List<Integer>> partitions;
 
+    @PluginProperty(group = "advanced")
     private Property<String> groupId;
 
     @Schema(
@@ -215,20 +220,27 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Property<QueueAcknowledgeType> acknowledgeType = Property.ofValue(QueueAcknowledgeType.ACCEPT);
 
     @Builder.Default
+    @PluginProperty(group = "connection")
     private Property<SerdeType> keyDeserializer = Property.ofValue(SerdeType.STRING);
 
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
+    @PluginProperty(group = "reliability")
     private OnSerdeError onSerdeError;
 
+    @PluginProperty(group = "advanced")
     private Property<String> since;
 
     @Builder.Default
+    @PluginProperty(group = "execution")
     private Property<Duration> pollDuration = Property.ofValue(Duration.ofSeconds(5));
 
+    @PluginProperty(group = "advanced")
     private Property<Integer> maxRecords;
 
+    @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
 
     @Getter(AccessLevel.PACKAGE)
@@ -238,6 +250,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         title = "Filter messages by Kafka headers",
         description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
     )
+    @PluginProperty(group = "processing")
     private Property<Map<String, String>> headerFilters;
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -732,6 +745,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @VisibleForTesting
     static final class TopicPartitionsSubscription implements ConsumerSubscription {
 
+        @PluginProperty(group = "advanced")
         private final String groupId;
         private final List<String> topics;
         private final Long fromTimestamp;

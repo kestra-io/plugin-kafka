@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.Map;
 import jakarta.validation.constraints.NotNull;
+import io.kestra.core.models.annotations.PluginProperty;
 public interface KafkaConnectionInterface {
     @Schema(
         title = "Kafka client properties",
@@ -13,11 +14,13 @@ public interface KafkaConnectionInterface {
             """
     )
     @NotNull
+    @PluginProperty(group = "main")
     Property<Map<String, String>> getProperties();
 
     @Schema(
         title="Serializer or deserializer properties",
         description = "Passed to serdes; `avro.use.logical.type.converters` is forced to true by default."
     )
+    @PluginProperty(group = "advanced")
     Property<Map<String, String>> getSerdeProperties();
 }

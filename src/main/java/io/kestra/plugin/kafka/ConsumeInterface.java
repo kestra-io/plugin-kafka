@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Duration;
 
 import jakarta.validation.constraints.NotNull;
+import io.kestra.core.models.annotations.PluginProperty;
 
 public interface ConsumeInterface extends KafkaConsumerInterface {
 
@@ -13,12 +14,14 @@ public interface ConsumeInterface extends KafkaConsumerInterface {
         title = "Maximum records to consume before stopping",
         description = "Soft limit checked on each poll."
     )
+    @PluginProperty(group = "execution")
     Property<Integer> getMaxRecords();
 
     @Schema(
         title = "Maximum duration to wait before stopping",
         description = "Soft limit checked on each poll."
     )
+    @PluginProperty(group = "execution")
     Property<Duration> getMaxDuration();
 
     @Schema(
@@ -26,5 +29,6 @@ public interface ConsumeInterface extends KafkaConsumerInterface {
         description = "Maximum wait per poll when no records are available."
     )
     @NotNull
+    @PluginProperty(group = "main")
     Property<Duration> getPollDuration();
 }
