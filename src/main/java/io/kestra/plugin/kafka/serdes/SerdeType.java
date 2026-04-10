@@ -13,5 +13,6 @@ public enum SerdeType {
     UUID,
     VOID,
     AVRO,
-    JSON
+    JSON,
+    PROTOBUF
 }

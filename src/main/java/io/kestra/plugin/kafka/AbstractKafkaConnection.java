@@ -4,6 +4,8 @@ import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.confluent.kafka.serializers.KafkaAvroDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonDeserializer;
 import io.confluent.kafka.serializers.KafkaJsonSerializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer;
+import io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
@@ -72,6 +74,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
             case VOID -> new VoidSerializer();
             case AVRO -> new MapToGenericRecordSerializer(new KafkaAvroSerializer(), avroSchema);
             case JSON -> new KafkaJsonSerializer<>();
+            case PROTOBUF -> new KafkaProtobufSerializer<>();
         };
     }
 
@@ -99,6 +102,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
                     }
                 }
             };
+            case PROTOBUF -> new KafkaProtobufDeserializer<>();
         };
     }
 
