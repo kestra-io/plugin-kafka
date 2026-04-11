@@ -2,21 +2,15 @@ package io.kestra.plugin.kafka;
 
 
 import com.google.common.collect.ImmutableMap;
+import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.repositories.LocalFlowRepositoryLoader;
-import io.kestra.core.runners.FlowListeners;
 import io.kestra.core.runners.RunContextFactory;
-import io.kestra.core.runners.Worker;
-import io.kestra.scheduler.AbstractScheduler;
-import io.kestra.core.utils.IdUtils;
-import io.kestra.jdbc.runner.JdbcScheduler;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
-import io.micronaut.context.ApplicationContext;
 import io.micronaut.context.annotation.Value;
-import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
@@ -30,14 +24,8 @@ import java.util.concurrent.TimeUnit;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 
-@KestraTest
+@KestraTest(startRunner = true, startScheduler = true)
 class RealtimeTriggerTest {
-    @Inject
-    private ApplicationContext applicationContext;
-
-    @Inject
-    private FlowListeners flowListenersService;
-
     @Inject
     private DispatchQueueInterface<Execution> executionQueue;
 
@@ -54,55 +42,41 @@ class RealtimeTriggerTest {
 
     @Test
     void flow() throws Exception {
-        CountDownLatch queue1Count = new CountDownLatch(2);
-        CountDownLatch queue2Count = new CountDownLatch(2);
+        var queue1Count = new CountDownLatch(2);
+        var queue2Count = new CountDownLatch(2);
+        var executionList = new CopyOnWriteArrayList<Execution>();
 
-        // scheduler
-        try (Worker worker = applicationContext.createBean(Worker.class, IdUtils.create(), 8, null)) {
-            try (
-                AbstractScheduler scheduler = new JdbcScheduler(
-                    this.applicationContext,
-                    this.flowListenersService
-                )
-            ) {
-                List<Execution> executionList = new CopyOnWriteArrayList<>();
+        executionQueue.addListener(execution -> {
+            executionList.add(execution);
 
-                // wait for execution
-                executionQueue.addListener(execution -> {
-                    executionList.add(execution.getLeft());
-
-                    if (queue1Count.getCount() == 0) {
-                        queue2Count.countDown();
-                    } else {
-                        queue1Count.countDown();
-                    }
-                    assertThat(execution.getLeft().getFlowId(), is("realtime"));
-                });
-
-                worker.run();
-                scheduler.run();
-
-                repositoryLoader.load(Objects.requireNonNull(RealtimeTriggerTest.class.getClassLoader()
-                    .getResource("flows/realtime.yaml")));
-
-                produce();
-                boolean await = queue1Count.await(1, TimeUnit.MINUTES);
-                assertThat(await, is(true));
-                assertThat(executionList.size(), is(2));
-                assertThat(executionList.stream()
-                    .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key1"))
-                    .count(), is(1L));
-                executionList.clear();
-
-                produce();
-                await = queue2Count.await(1, TimeUnit.MINUTES);
-                assertThat(await, is(true));
-                assertThat(executionList.size(), is(2));
-                assertThat(executionList.stream()
-                    .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key2"))
-                    .count(), is(1L));
+            if (queue1Count.getCount() == 0) {
+                queue2Count.countDown();
+            } else {
+                queue1Count.countDown();
             }
-        }
+            assertThat(execution.getFlowId(), is("realtime"));
+        });
+
+        repositoryLoader.load(
+            Objects.requireNonNull(
+                RealtimeTriggerTest.class.getClassLoader().getResource("flows/realtime.yaml")
+            )
+        );
+
+        produce();
+        assertThat(queue1Count.await(1, TimeUnit.MINUTES), is(true));
+        assertThat(executionList.size(), is(2));
+        assertThat(executionList.stream()
+            .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key1"))
+            .count(), is(1L));
+        executionList.clear();
+
+        produce();
+        assertThat(queue2Count.await(1, TimeUnit.MINUTES), is(true));
+        assertThat(executionList.size(), is(2));
+        assertThat(executionList.stream()
+            .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key2"))
+            .count(), is(1L));
     }
 
     void produce() throws Exception {
