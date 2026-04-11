@@ -11,6 +11,13 @@ kestra:
     liveness:
       enabled: false
 
+worker:
+  controllers:
+    type: STATIC
+    static:
+      endpoints:
+        - host: localhost
+
 kafka:
   bootstrap: localhost:9092
   registry: http://localhost:8085
