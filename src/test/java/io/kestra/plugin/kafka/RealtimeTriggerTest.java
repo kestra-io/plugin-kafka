@@ -25,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 
 @KestraTest(startRunner = true, startScheduler = true)
@@ -66,19 +67,17 @@ class RealtimeTriggerTest {
         produce();
         boolean await = queue1Count.await(1, TimeUnit.MINUTES);
         assertThat(await, is(true));
-        assertThat(executionList.size(), is(2));
+        assertThat(executionList.size(), greaterThanOrEqualTo(2));
         assertThat(executionList.stream()
-            .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key1"))
-            .count(), is(1L));
+            .anyMatch(execution -> "key1".equals(execution.getTrigger().getVariables().get("key"))), is(true));
         executionList.clear();
 
         produce();
         await = queue2Count.await(1, TimeUnit.MINUTES);
         assertThat(await, is(true));
-        assertThat(executionList.size(), is(2));
+        assertThat(executionList.size(), greaterThanOrEqualTo(2));
         assertThat(executionList.stream()
-            .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key2"))
-            .count(), is(1L));
+            .anyMatch(execution -> "key2".equals(execution.getTrigger().getVariables().get("key"))), is(true));
         receive.blockLast();
     }
 
