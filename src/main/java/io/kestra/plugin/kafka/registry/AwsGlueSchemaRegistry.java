@@ -1,5 +1,6 @@
 package io.kestra.plugin.kafka.registry;
 
+import io.kestra.core.models.annotations.PluginProperty;
 import com.amazonaws.services.schemaregistry.deserializers.avro.AWSKafkaAvroDeserializer;
 import com.amazonaws.services.schemaregistry.serializers.avro.AWSKafkaAvroSerializer;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
@@ -78,10 +79,12 @@ public class AwsGlueSchemaRegistry extends SchemaRegistryVendor {
 
     @Schema(title = "The AWS access key ID. Optional when using IAM roles or environment credentials.")
     @Nullable
+    @PluginProperty(secret = true)
     private Property<String> accessKey;
 
     @Schema(title = "The AWS secret access key. Optional when using IAM roles or environment credentials.")
     @Nullable
+    @PluginProperty(secret = true)
     private Property<String> secretKey;
 
     @Override
