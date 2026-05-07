@@ -2,20 +2,17 @@ package io.kestra.plugin.kafka;
 
 
 import com.google.common.collect.ImmutableMap;
+import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.queues.QueueFactoryInterface;
-import io.kestra.core.queues.QueueInterface;
+import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.repositories.LocalFlowRepositoryLoader;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
-import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
-import jakarta.inject.Named;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -25,14 +22,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 
 @KestraTest(startRunner = true, startScheduler = true)
 class RealtimeTriggerTest {
     @Inject
-    @Named(QueueFactoryInterface.EXECUTION_NAMED)
-    private QueueInterface<Execution> executionQueue;
+    private DispatchQueueInterface<Execution> executionQueue;
 
     @Inject
     protected LocalFlowRepositoryLoader repositoryLoader;
@@ -47,38 +42,41 @@ class RealtimeTriggerTest {
 
     @Test
     void flow() throws Exception {
-        CountDownLatch queue1Count = new CountDownLatch(2);
-        CountDownLatch queue2Count = new CountDownLatch(2);
-        List<Execution> executionList = new CopyOnWriteArrayList<>();
-        Flux<Execution> receive = TestsUtils.receive(executionQueue, execution -> {
-            executionList.add(execution.getLeft());
+        var queue1Count = new CountDownLatch(2);
+        var queue2Count = new CountDownLatch(2);
+        var executionList = new CopyOnWriteArrayList<Execution>();
+
+        executionQueue.addListener(execution -> {
+            executionList.add(execution);
 
             if (queue1Count.getCount() == 0) {
                 queue2Count.countDown();
             } else {
                 queue1Count.countDown();
             }
-            assertThat(execution.getLeft().getFlowId(), is("realtime"));
+            assertThat(execution.getFlowId(), is("realtime"));
         });
 
-        repositoryLoader.load(Objects.requireNonNull(RealtimeTriggerTest.class.getClassLoader()
-            .getResource("flows/realtime.yaml")));
+        repositoryLoader.load(
+            Objects.requireNonNull(
+                RealtimeTriggerTest.class.getClassLoader().getResource("flows/realtime.yaml")
+            )
+        );
 
         produce();
-        boolean await = queue1Count.await(1, TimeUnit.MINUTES);
-        assertThat(await, is(true));
-        assertThat(executionList.size(), greaterThanOrEqualTo(2));
+        assertThat(queue1Count.await(1, TimeUnit.MINUTES), is(true));
+        assertThat(executionList.size(), is(2));
         assertThat(executionList.stream()
-            .anyMatch(execution -> "key1".equals(execution.getTrigger().getVariables().get("key"))), is(true));
+            .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key1"))
+            .count(), is(1L));
         executionList.clear();
 
         produce();
-        await = queue2Count.await(1, TimeUnit.MINUTES);
-        assertThat(await, is(true));
-        assertThat(executionList.size(), greaterThanOrEqualTo(2));
+        assertThat(queue2Count.await(1, TimeUnit.MINUTES), is(true));
+        assertThat(executionList.size(), is(2));
         assertThat(executionList.stream()
-            .anyMatch(execution -> "key2".equals(execution.getTrigger().getVariables().get("key"))), is(true));
-        receive.blockLast();
+            .filter(execution -> execution.getTrigger().getVariables().get("key").equals("key2"))
+            .count(), is(1L));
     }
 
     void produce() throws Exception {
