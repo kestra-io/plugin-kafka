@@ -19,13 +19,16 @@ import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ShareConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
+import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.*;
@@ -47,6 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
         Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
+        Emits INFO logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
         """
 )
 @Plugin(
@@ -247,14 +251,29 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                                                                final RunContext runContext) {
         return Flux.create(fluxSink -> {
             try {
-                if (task.resolveGroupType(runContext) == GroupType.SHARE) {
+                var rProperties = runContext.render(this.properties).asMap(String.class, String.class);
+                var rGroupId = runContext.render(this.groupId).as(String.class).orElse(null);
+                var rGroupType = task.resolveGroupType(runContext);
+                var rKeyDeserializer = runContext.render(this.keyDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
+                var rValueDeserializer = runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
+                var bootstrapServers = rProperties.get("bootstrap.servers");
+
+                runContext.logger().info(
+                    "Starting Kafka trigger triggerId={} bootstrap.servers={} groupId={} groupType={} topics={} topicPattern={} partitions={} keyDeserializer={} valueDeserializer={}",
+                    this.id, bootstrapServers, rGroupId, rGroupType,
+                    this.topic, this.topicPattern, this.partitions,
+                    rKeyDeserializer, rValueDeserializer
+                );
+
+                if (rGroupType == GroupType.SHARE) {
                     runWithShareConsumer(task, runContext, fluxSink);
                 } else {
                     runWithConsumer(task, runContext, fluxSink);
                 }
             } catch (WakeupException e) {
-                // ignore and stop
+                runContext.logger().info("Kafka trigger triggerId={} woken up; stopping poll loop", this.id);
             } catch (Exception e) {
+                runContext.logger().error("Kafka trigger triggerId={} failed with error: {}", this.id, e.getMessage());
                 fluxSink.error(e);
             } finally {
                 fluxSink.complete();
@@ -266,9 +285,36 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private void runWithConsumer(Consume task,
                                  RunContext runContext,
                                  FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
+        Logger logger = runContext.logger();
         try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
             this.consumer.set(consumer);
-            task.topicSubscription(runContext).subscribe(runContext, consumer, task);
+            logger.info("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
+
+            var subscription = task.topicSubscription(runContext);
+            var firstAssignment = new AtomicBoolean(false);
+            var rebalanceListener = new ConsumerRebalanceListener() {
+                @Override
+                public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                    if (firstAssignment.compareAndSet(false, true)) {
+                        logger.info("Kafka connection established for triggerId={}: partitions assigned = {}", RealtimeTrigger.this.id, partitions);
+                    }
+                }
+
+                @Override
+                public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                    // intentionally left blank — revocation does not change connection state
+                }
+            };
+            subscription.subscribe(runContext, consumer, task, rebalanceListener);
+
+            logger.info(
+                "Subscribed for triggerId={}: topics={} topicPattern={} partitions={}",
+                this.id,
+                this.topic,
+                this.topicPattern,
+                this.partitions
+            );
+
             runPollingLoop(() -> {
                 var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
                 task.processConsumerRecords(runContext, records, fluxSink::next);
@@ -280,12 +326,27 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private void runWithShareConsumer(Consume task,
                                       RunContext runContext,
                                       FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
+        Logger logger = runContext.logger();
         task.validateShareConfiguration();
         try (var consumer = task.shareConsumer(runContext)) {
             this.shareConsumer.set(consumer);
+            logger.info("Kafka consumer created for triggerId={} groupId={} groupType=SHARE", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
+
             task.shareSubscribe(runContext, consumer);
+            logger.info(
+                "Subscribed for triggerId={}: topics={} topicPattern={} partitions={}",
+                this.id,
+                this.topic,
+                this.topicPattern,
+                this.partitions
+            );
+
+            var firstShareBatch = new AtomicBoolean(false);
             runPollingLoop(() -> {
                 var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
+                if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
+                    logger.info("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
+                }
                 task.processShareConsumerRecords(runContext, consumer, records, fluxSink::next);
                 consumer.commitSync();
             });
@@ -331,6 +392,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         if (!isActive.compareAndSet(true, false)) {
             return;
         }
+
+        // Logging here requires a stable logger reference since RunContext may not be available
+        org.slf4j.LoggerFactory.getLogger(RealtimeTrigger.class)
+            .info("Stopping Kafka trigger triggerId={} (wait={})", this.id, wait);
 
         var hasConsumer = consumer.get() != null || shareConsumer.get() != null;
         Optional.ofNullable(consumer.get()).ifPresent(Consumer::wakeup);
