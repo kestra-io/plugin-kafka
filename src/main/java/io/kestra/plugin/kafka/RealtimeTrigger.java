@@ -250,6 +250,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
                                                                final RunContext runContext) {
         return Flux.create(fluxSink -> {
+            var logger = runContext.logger();
             try {
                 var rProperties = runContext.render(this.properties).asMap(String.class, String.class);
                 var rGroupId = runContext.render(this.groupId).as(String.class).orElse(null);
@@ -258,7 +259,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 var rValueDeserializer = runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
                 var bootstrapServers = rProperties.get("bootstrap.servers");
 
-                runContext.logger().debug(
+                logger.debug(
                     "Starting Kafka trigger triggerId={} bootstrap.servers={} groupId={} groupType={} topics={} topicPattern={} partitions={} keyDeserializer={} valueDeserializer={}",
                     this.id, bootstrapServers, rGroupId, rGroupType,
                     this.topic, this.topicPattern, this.partitions,
@@ -271,9 +272,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                     runWithConsumer(task, runContext, fluxSink);
                 }
             } catch (WakeupException e) {
-                runContext.logger().debug("Kafka trigger triggerId={} woken up; stopping poll loop", this.id);
+                logger.debug("Kafka trigger triggerId={} woken up; stopping poll loop", this.id);
             } catch (Exception e) {
-                runContext.logger().error("Kafka trigger triggerId={} failed with error: {}", this.id, e.getMessage());
+                logger.error("Kafka trigger triggerId={} failed with error: {}", this.id, e.getMessage());
                 fluxSink.error(e);
             } finally {
                 fluxSink.complete();
@@ -344,6 +345,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             var firstShareBatch = new AtomicBoolean(false);
             runPollingLoop(() -> {
                 var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
+                // compareAndSet flips the flag and returns true only on the first non-empty batch, so this logs once
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
                     logger.debug("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
                 }
