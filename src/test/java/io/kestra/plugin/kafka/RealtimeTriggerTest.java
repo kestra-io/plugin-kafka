@@ -115,7 +115,7 @@ class RealtimeTriggerTest {
         // runContext.logger() returns a Logback logger from an isolated LoggerContext inside RunContextLogger.
         // Cast it to attach our ListAppender directly, ensuring we capture logs regardless of global config.
         var contextLogger = (Logger) runContext.logger();
-        contextLogger.setLevel(Level.INFO);
+        contextLogger.setLevel(Level.DEBUG);
         var listAppender = new ListAppender<ILoggingEvent>();
         listAppender.setContext(contextLogger.getLoggerContext());
         listAppender.start();
@@ -195,7 +195,7 @@ class RealtimeTriggerTest {
 
         // stop() uses LoggerFactory.getLogger(RealtimeTrigger.class) — set level and attach appender there
         var triggerLogger = (Logger) LoggerFactory.getLogger(RealtimeTrigger.class);
-        triggerLogger.setLevel(Level.INFO);
+        triggerLogger.setLevel(Level.DEBUG);
         var listAppender = new ListAppender<ILoggingEvent>();
         listAppender.setContext(triggerLogger.getLoggerContext());
         listAppender.start();

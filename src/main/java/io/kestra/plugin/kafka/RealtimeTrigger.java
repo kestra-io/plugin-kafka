@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
         Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
-        Emits INFO logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
+        Emits DEBUG logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
         """
 )
 @Plugin(
@@ -258,7 +258,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 var rValueDeserializer = runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
                 var bootstrapServers = rProperties.get("bootstrap.servers");
 
-                runContext.logger().info(
+                runContext.logger().debug(
                     "Starting Kafka trigger triggerId={} bootstrap.servers={} groupId={} groupType={} topics={} topicPattern={} partitions={} keyDeserializer={} valueDeserializer={}",
                     this.id, bootstrapServers, rGroupId, rGroupType,
                     this.topic, this.topicPattern, this.partitions,
@@ -271,7 +271,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                     runWithConsumer(task, runContext, fluxSink);
                 }
             } catch (WakeupException e) {
-                runContext.logger().info("Kafka trigger triggerId={} woken up; stopping poll loop", this.id);
+                runContext.logger().debug("Kafka trigger triggerId={} woken up; stopping poll loop", this.id);
             } catch (Exception e) {
                 runContext.logger().error("Kafka trigger triggerId={} failed with error: {}", this.id, e.getMessage());
                 fluxSink.error(e);
@@ -288,7 +288,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         Logger logger = runContext.logger();
         try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
             this.consumer.set(consumer);
-            logger.info("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
+            logger.debug("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
 
             var subscription = task.topicSubscription(runContext);
             var firstAssignment = new AtomicBoolean(false);
@@ -296,7 +296,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 @Override
                 public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
                     if (firstAssignment.compareAndSet(false, true)) {
-                        logger.info("Kafka connection established for triggerId={}: partitions assigned = {}", RealtimeTrigger.this.id, partitions);
+                        logger.debug("Kafka connection established for triggerId={}: partitions assigned = {}", RealtimeTrigger.this.id, partitions);
                     }
                 }
 
@@ -307,7 +307,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             };
             subscription.subscribe(runContext, consumer, task, rebalanceListener);
 
-            logger.info(
+            logger.debug(
                 "Subscribed for triggerId={}: topics={} topicPattern={} partitions={}",
                 this.id,
                 this.topic,
@@ -330,10 +330,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         task.validateShareConfiguration();
         try (var consumer = task.shareConsumer(runContext)) {
             this.shareConsumer.set(consumer);
-            logger.info("Kafka consumer created for triggerId={} groupId={} groupType=SHARE", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
+            logger.debug("Kafka consumer created for triggerId={} groupId={} groupType=SHARE", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
 
             task.shareSubscribe(runContext, consumer);
-            logger.info(
+            logger.debug(
                 "Subscribed for triggerId={}: topics={} topicPattern={} partitions={}",
                 this.id,
                 this.topic,
@@ -345,7 +345,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             runPollingLoop(() -> {
                 var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
-                    logger.info("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
+                    logger.debug("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
                 }
                 task.processShareConsumerRecords(runContext, consumer, records, fluxSink::next);
                 consumer.commitSync();
@@ -395,7 +395,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
         // Logging here requires a stable logger reference since RunContext may not be available
         org.slf4j.LoggerFactory.getLogger(RealtimeTrigger.class)
-            .info("Stopping Kafka trigger triggerId={} (wait={})", this.id, wait);
+            .debug("Stopping Kafka trigger triggerId={} (wait={})", this.id, wait);
 
         var hasConsumer = consumer.get() != null || shareConsumer.get() != null;
         Optional.ofNullable(consumer.get()).ifPresent(Consumer::wakeup);
