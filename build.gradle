@@ -1,13 +1,13 @@
 plugins {
     id "com.vanniktech.maven.publish" version "0.36.0"
-    id "io.kestra.gradle.inject-bom-versions" version "1.0.4"
+    id "io.kestra.gradle.inject-bom-versions" version "1.1.0"
     id 'java-library'
     id "idea"
     id 'jacoco'
     id "com.adarshr.test-logger" version "4.0.0"
     id "com.gradleup.shadow" version "9.4.1"
     id 'signing'
-    id "com.github.ben-manes.versions" version "0.53.0"
+    id "com.github.ben-manes.versions" version "0.54.0"
     id 'net.researchgate.release' version '3.1.0'
 }
 
@@ -54,7 +54,7 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
 
     // libs included in the final jar
-    api group: "org.apache.kafka", name: "kafka-clients", version: "4.2.0" // we don't want to be linked to the platform BOM here (Kestra EE uses Kafka internally)
+    api group: "org.apache.kafka", name: "kafka-clients", version: "4.3.0" // we don't want to be linked to the platform BOM here (Kestra EE uses Kafka internally)
     api group: "io.confluent", name: "kafka-schema-registry-client", version: confluentVersion
     api group: "io.confluent", name: "kafka-avro-serializer", version: confluentVersion
     api group: "io.confluent", name: "kafka-protobuf-serializer", version: confluentVersion
@@ -68,7 +68,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
-    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.5'
+    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.6'
 
     implementation 'software.amazon.glue:schema-registry-serde:1.1.24'
 }
@@ -130,6 +130,8 @@ dependencies {
     testImplementation "org.hamcrest:hamcrest-library"
 
     testImplementation "org.wiremock:wiremock-jetty12"
+
+    testImplementation "ch.qos.logback:logback-classic"
 }
 
 /**********************************************************************************************************************\

@@ -711,6 +711,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         void subscribe(RunContext runContext, Consumer<Object, Object> consumer, ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException;
 
+        default void subscribe(RunContext runContext, Consumer<Object, Object> consumer, ConsumeInterface consumeInterface,
+                               ConsumerRebalanceListener rebalanceListener) throws IllegalVariableEvaluationException {
+            subscribe(runContext, consumer, consumeInterface);
+        }
+
         default void waitForSubscription(RunContext runContext,
                                          final Consumer<Object, Object> consumer,
                                          final ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException {
@@ -734,6 +739,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
 
         @Override
+        public void subscribe(RunContext runContext, final Consumer<Object, Object> consumer,
+                              final ConsumeInterface consumeInterface, final ConsumerRebalanceListener rebalanceListener) {
+            consumer.subscribe(pattern, rebalanceListener);
+        }
+
+        @Override
         public String toString() {
             return "[Subscription pattern=" + pattern + ", groupId=" + groupId + "]";
         }
@@ -748,6 +759,13 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         @Override
         public void subscribe(RunContext runContext, final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException {
             consumer.subscribe(topics);
+            waitForSubscription(runContext, consumer, consumeInterface);
+        }
+
+        @Override
+        public void subscribe(RunContext runContext, final Consumer<Object, Object> consumer,
+                              final ConsumeInterface consumeInterface, final ConsumerRebalanceListener rebalanceListener) throws IllegalVariableEvaluationException {
+            consumer.subscribe(topics, rebalanceListener);
             waitForSubscription(runContext, consumer, consumeInterface);
         }
 
@@ -798,11 +816,22 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         @Override
         public void subscribe(RunContext runContext, final Consumer<Object, Object> consumer, final ConsumeInterface consumeInterface) {
+            subscribe(runContext, consumer, consumeInterface, null);
+        }
+
+        @Override
+        public void subscribe(RunContext runContext, final Consumer<Object, Object> consumer,
+                              final ConsumeInterface consumeInterface, final ConsumerRebalanceListener rebalanceListener) {
             if (this.topicPartitions == null) {
                 this.topicPartitions = allPartitionsForTopics(consumer, topics);
             }
 
             consumer.assign(this.topicPartitions);
+            // assign() does not trigger rebalance callbacks — notify listener immediately after assignment
+            if (rebalanceListener != null) {
+                rebalanceListener.onPartitionsAssigned(this.topicPartitions);
+            }
+
             if (this.fromTimestamp == null) {
                 consumer.seekToBeginning(this.topicPartitions);
                 return;
