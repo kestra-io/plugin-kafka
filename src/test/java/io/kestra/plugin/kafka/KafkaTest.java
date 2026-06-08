@@ -95,7 +95,7 @@ public class KafkaTest {
         String topic = "tu_" + IdUtils.create();
 
         File tempFile = File.createTempFile(this.getClass().getSimpleName().toLowerCase() + "_", ".trs");
-        OutputStream output = new FileOutputStream(tempFile);
+        OutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE);
 
         for (int i = 0; i < 50; i++) {
             HashMap<Object, Object> data = new HashMap<>();
@@ -161,9 +161,10 @@ public class KafkaTest {
         Consume.Output consumeOutput = consume.run(runContext);
         assertThat(consumeOutput.getMessagesCount(), is(50));
 
-        BufferedReader inputStream = new BufferedReader(new InputStreamReader(storageInterface.get(TenantService.MAIN_TENANT, null, consumeOutput.getUri())));
         List<Map<String, Object>> result = new ArrayList<>();
-        FileSerde.reader(inputStream, r -> result.add((Map<String, Object>) r));
+        try (var inputStream = new BufferedInputStream(storageInterface.get(TenantService.MAIN_TENANT, null, consumeOutput.getUri()), FileSerde.BUFFER_SIZE)) {
+            FileSerde.read(inputStream, r -> result.add((Map<String, Object>) r));
+        }
 
         assertThat(result.size(), is(50));
 
@@ -1008,8 +1009,8 @@ public class KafkaTest {
     }
 
     private static void assertOutputFile(RunContext runContext, Consume.Output consumeOutput) throws IOException {
-        InputStream is = runContext.storage().getFile(consumeOutput.getUri());
-        Flux<Map> reader = FileSerde.readAll(new BufferedReader(new InputStreamReader(is)), Map.class);
+        var is = new BufferedInputStream(runContext.storage().getFile(consumeOutput.getUri()), FileSerde.BUFFER_SIZE);
+        Flux<Map> reader = FileSerde.readAll(is, Map.class);
         Map<String, Object> result = reader.blockLast();
         Assertions.assertNotNull(result);
         Assertions.assertTrue(result.containsKey("key"));
@@ -1027,8 +1028,9 @@ public class KafkaTest {
         map.put("timestamp", Instant.now().toEpochMilli());
 
         File tempFile = File.createTempFile("consumeProduce", ".txt");
-        OutputStream output = new FileOutputStream(tempFile);
-        FileSerde.write(output, map);
+        try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
+            FileSerde.write(output, map);
+        }
         return tempFile;
     }
 

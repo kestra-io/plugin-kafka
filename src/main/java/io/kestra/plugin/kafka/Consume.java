@@ -363,7 +363,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     private Output runWithConsumer(RunContext runContext, File tempFile) throws Exception {
         try (
-            var output = new BufferedOutputStream(new FileOutputStream(tempFile));
+            var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE);
             var consumer = this.consumer(runContext)
         ) {
             this.subscription = topicSubscription(runContext);
@@ -406,7 +406,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Output runWithShareConsumer(RunContext runContext, File tempFile) throws Exception {
         validateShareConfiguration();
         try (
-            var output = new BufferedOutputStream(new FileOutputStream(tempFile));
+            var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE);
             var consumer = this.shareConsumer(runContext)
         ) {
             shareSubscribe(runContext, consumer);
