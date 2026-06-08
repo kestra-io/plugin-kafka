@@ -95,26 +95,26 @@ public class KafkaTest {
         String topic = "tu_" + IdUtils.create();
 
         File tempFile = File.createTempFile(this.getClass().getSimpleName().toLowerCase() + "_", ".trs");
-        OutputStream output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE);
+        try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
+            for (int i = 0; i < 50; i++) {
+                HashMap<Object, Object> data = new HashMap<>();
+                data.put("username", "Kestra-" + i);
+                data.put("tweet", "Kestra is open source");
+                data.put("timestamp", System.currentTimeMillis() / 1000);
+                data.put("instant", ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant());
+                data.put("zonedDatetimeMillis", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"));
+                data.put("zonedDatetimeMicros", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"));
+                data.put("offsetDatetimeMillis", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"));
+                data.put("offsetDatetimeMicros", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"));
+                data.put("unionLogical", i < 25 ? ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant() : null);
 
-        for (int i = 0; i < 50; i++) {
-            HashMap<Object, Object> data = new HashMap<>();
-            data.put("username", "Kestra-" + i);
-            data.put("tweet", "Kestra is open source");
-            data.put("timestamp", System.currentTimeMillis() / 1000);
-            data.put("instant", ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant());
-            data.put("zonedDatetimeMillis", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"));
-            data.put("zonedDatetimeMicros", ZonedDateTime.parse("2022-01-03T00:00:00+01:00"));
-            data.put("offsetDatetimeMillis", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"));
-            data.put("offsetDatetimeMicros", OffsetDateTime.parse("2022-01-03T00:00:00+01:00"));
-            data.put("unionLogical", i < 25 ? ZonedDateTime.parse("2022-01-03T00:00:00+01:00").toInstant() : null);
-
-            FileSerde.write(output, ImmutableMap.builder()
-                .put("key", "key-" + i)
-                .put("value", data)
-                .put("timestamp", Instant.now().toEpochMilli())
-                .build()
-            );
+                FileSerde.write(output, ImmutableMap.builder()
+                    .put("key", "key-" + i)
+                    .put("value", data)
+                    .put("timestamp", Instant.now().toEpochMilli())
+                    .build()
+                );
+            }
         }
 
         URI uri = storageInterface.put(TenantService.MAIN_TENANT, null, URI.create("/" + IdUtils.create() + ".ion"), new FileInputStream(tempFile));
