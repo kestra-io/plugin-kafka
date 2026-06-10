@@ -17,6 +17,7 @@ import jakarta.inject.Inject;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Assertions;
@@ -1006,6 +1007,32 @@ public class KafkaTest {
         } finally {
             glueMock.stop();
         }
+    }
+
+    @Test
+    void onAsyncSendError_shouldFail() {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String topic = "tu_" + IdUtils.create();
+
+        // A value above the broker's message.max.bytes (~1MB default) is accepted by the client
+        // because max.request.size is raised, then rejected by the broker through the send callback.
+        // Before the fix this error was discarded and the task reported success.
+        String oversizedValue = "x".repeat(2 * 1024 * 1024);
+
+        Produce task = Produce.builder()
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "max.request.size", "10485760",
+                "buffer.memory", "20971520"
+            )))
+            .transactional(Property.ofValue(false))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(Map.of("key", "key", "value", oversizedValue))
+            .build();
+
+        assertThrows(RecordTooLargeException.class, () -> task.run(runContext));
     }
 
     private static void assertOutputFile(RunContext runContext, Consume.Output consumeOutput) throws IOException {
