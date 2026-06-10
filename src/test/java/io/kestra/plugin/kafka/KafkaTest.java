@@ -1014,9 +1014,7 @@ public class KafkaTest {
         RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_" + IdUtils.create();
 
-        // A value above the broker's message.max.bytes (~1MB default) is accepted by the client
-        // because max.request.size is raised, then rejected by the broker through the send callback.
-        // Before the fix this error was discarded and the task reported success.
+        // Too big for the broker but allowed by the client, so it fails async via the send callback.
         String oversizedValue = "x".repeat(2 * 1024 * 1024);
 
         Produce task = Produce.builder()
