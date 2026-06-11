@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
@@ -237,6 +238,9 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         KafkaProducer<Object, Object> producer = new KafkaProducer<>(properties, keySerializer, valueSerializer);
 
+        // send() is async, broker-side failures only reach the callback. Capture the first one.
+        final AtomicReference<Exception> sendException = new AtomicReference<>();
+
         try {
             if (transactional) {
                 producer.initTransactions();
@@ -245,11 +249,26 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
             Integer count = Data.from(from).read(runContext)
                 .map(throwFunction(row -> {
-                    producer.send(this.producerRecord(runContext, producer, row));
+                    producer.send(this.producerRecord(runContext, producer, row), (metadata, exception) -> {
+                        if (exception != null) {
+                            sendException.compareAndSet(null, exception);
+                        }
+                    });
                     return 1;
                 }))
                 .reduce(Integer::sum)
                 .blockOptional().orElse(0);
+
+            // Drain pending sends so callbacks run, then fail the task if any send failed.
+            if (transactional) {
+                producer.commitTransaction();
+            }
+            producer.flush();
+
+            Exception exception = sendException.get();
+            if (exception != null) {
+                throw exception;
+            }
 
             runContext.metric(Counter.of("records", count));
 
@@ -257,10 +276,6 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
                 .messagesCount(count)
                 .build();
         } finally {
-            if (transactional) {
-                producer.commitTransaction();
-            }
-            producer.flush();
             producer.close();
         }
     }
