@@ -27,6 +27,8 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -231,6 +233,173 @@ class RealtimeTriggerTest {
             );
         } finally {
             triggerLogger.detachAppender(listAppender);
+        }
+    }
+
+    @Test
+    void shouldBackOffWhenBrokerUnreachable_consumer() throws Exception {
+        var triggerId = IdUtils.create();
+        var deadPort = findFreePort();
+
+        var trigger = RealtimeTrigger.builder()
+            .id(triggerId)
+            .type(RealtimeTrigger.class.getName())
+            .topic("dead-broker-topic")
+            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", "localhost:" + deadPort,
+                // short timeouts so the test does not wait for Kafka's default 60s
+                "request.timeout.ms", "500",
+                "default.api.timeout.ms", "500",
+                "connections.max.idle.ms", "1000",
+                "reconnect.backoff.ms", "100",
+                "reconnect.backoff.max.ms", "200"
+            )))
+            .pollDuration(Property.ofValue(Duration.ofMillis(300)))
+            .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(2)))
+            .build();
+
+        var contextLogger = (ch.qos.logback.classic.Logger) runContextFactory.of(Map.of()).logger();
+        contextLogger.setLevel(ch.qos.logback.classic.Level.WARN);
+        var listAppender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+        listAppender.setContext(contextLogger.getLoggerContext());
+        listAppender.start();
+        contextLogger.addAppender(listAppender);
+
+        try {
+            RunContext runContext = runContextFactory.of(Map.of());
+            // attach appender to the actual run context logger
+            var rcLogger = (ch.qos.logback.classic.Logger) runContext.logger();
+            rcLogger.setLevel(ch.qos.logback.classic.Level.WARN);
+            rcLogger.addAppender(listAppender);
+
+            Consume task = trigger.consumeTask();
+            var errorList = new CopyOnWriteArrayList<Throwable>();
+
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, errorList::add);
+
+            // Give the loop a short window — if it busy-spins we'd see hundreds of iterations
+            // in this interval; with backoff it should sleep most of the time
+            long start = System.currentTimeMillis();
+            Thread.sleep(Duration.ofSeconds(4).toMillis());
+            trigger.stop();
+
+            long elapsed = System.currentTimeMillis() - start;
+
+            // At least one WARN about broker unreachability must appear
+            var warnMessages = listAppender.list.stream()
+                .filter(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
+                .toList();
+
+            assertThat(
+                "Expected at least one WARN log about unreachable broker",
+                warnMessages.stream().anyMatch(m -> m.contains("broker unreachable") || m.contains("retrying")),
+                is(true)
+            );
+
+            // Verify stop() completes promptly — well within the test timeout
+            assertThat("stop() must complete within 4s window", elapsed, lessThan(6000L));
+        } finally {
+            contextLogger.detachAppender(listAppender);
+        }
+    }
+
+    @Test
+    void shouldFailAfterMaxReconnectAttempts() throws Exception {
+        var triggerId = IdUtils.create();
+        var deadPort = findFreePort();
+
+        var trigger = RealtimeTrigger.builder()
+            .id(triggerId)
+            .type(RealtimeTrigger.class.getName())
+            .topic("dead-broker-topic")
+            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", "localhost:" + deadPort,
+                "request.timeout.ms", "500",
+                "default.api.timeout.ms", "500",
+                "connections.max.idle.ms", "1000",
+                "reconnect.backoff.ms", "100",
+                "reconnect.backoff.max.ms", "200"
+            )))
+            .pollDuration(Property.ofValue(Duration.ofMillis(300)))
+            .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(500)))
+            .maxReconnectAttempts(Property.ofValue(3))
+            .build();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = trigger.consumeTask();
+        var errors = new CopyOnWriteArrayList<Throwable>();
+        var completedLatch = new CountDownLatch(1);
+
+        Flux.from(trigger.publisher(task, runContext))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(record -> {}, err -> {
+                errors.add(err);
+                completedLatch.countDown();
+            }, completedLatch::countDown);
+
+        boolean completed = completedLatch.await(20, TimeUnit.SECONDS);
+        assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
+        assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
+        assertThat(
+            "Error message must mention maxReconnectAttempts",
+            errors.getFirst().getMessage(),
+            containsString("maxReconnectAttempts=3")
+        );
+    }
+
+    @Test
+    void shouldTerminatePromptlyDuringBackoff() throws Exception {
+        var triggerId = IdUtils.create();
+        var deadPort = findFreePort();
+
+        var trigger = RealtimeTrigger.builder()
+            .id(triggerId)
+            .type(RealtimeTrigger.class.getName())
+            .topic("dead-broker-topic")
+            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", "localhost:" + deadPort,
+                "request.timeout.ms", "500",
+                "default.api.timeout.ms", "500",
+                "connections.max.idle.ms", "1000",
+                "reconnect.backoff.ms", "100",
+                "reconnect.backoff.max.ms", "200"
+            )))
+            .pollDuration(Property.ofValue(Duration.ofMillis(300)))
+            // large backoff so stop() definitely interrupts a sleep
+            .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = trigger.consumeTask();
+        var completedLatch = new CountDownLatch(1);
+
+        Flux.from(trigger.publisher(task, runContext))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
+
+        // Wait until the loop enters backoff (first failure spin takes ~pollDuration + initial backoff ~1s)
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+
+        long stopStart = System.currentTimeMillis();
+        trigger.stop();
+        // stop() is non-blocking, but the flux completes asynchronously
+        boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+        long stopMs = System.currentTimeMillis() - stopStart;
+
+        assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
+        assertThat("stop() must not block longer than 5s", stopMs, lessThan(5000L));
+    }
+
+    private static int findFreePort() throws IOException {
+        try (var socket = new ServerSocket(0)) {
+            // close the socket so the port is released; we just need an unused port number
+            return socket.getLocalPort();
         }
     }
 
