@@ -51,6 +51,8 @@ import java.util.concurrent.atomic.AtomicReference;
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
         Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
         Emits DEBUG logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
+        When the broker is unreachable, the trigger backs off exponentially (up to `reconnectBackoffMax`) instead of busy-looping,
+        and emits a WARN log on each backoff escalation. Use `maxReconnectAttempts` to fail fast after a configurable number of retries.
         """
 )
 @Plugin(
@@ -193,6 +195,48 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     private Property<String> since;
 
+    @Schema(
+        title = "Filter messages by Kafka headers",
+        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
+    )
+    @PluginProperty(group = "advanced")
+    private Property<Map<String, String>> headerFilters;
+
+    @Schema(
+        title = "Poll timeout per iteration",
+        description = """
+            Maximum time to block inside a single `consumer.poll()` call.
+            A finite value is required so the loop can detect failure spins: when a poll returns well before
+            this duration with zero records, it is treated as a failed connection and triggers backoff.
+            Defaults to PT2S. Healthy idle polls (broker reachable, topic empty) return after this duration without triggering backoff.
+            """
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<Duration> pollDuration = Property.ofValue(Duration.ofSeconds(2));
+
+    @Schema(
+        title = "Maximum backoff delay between reconnect attempts",
+        description = """
+            Caps the exponential backoff sleep applied when the broker is unreachable.
+            Backoff starts at ~1 s and doubles on each failure spin, up to this maximum.
+            Defaults to PT30S. Reset to zero as soon as a poll succeeds.
+            """
+    )
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<Duration> reconnectBackoffMax = Property.ofValue(Duration.ofSeconds(30));
+
+    @Schema(
+        title = "Maximum number of consecutive reconnect attempts before failing the trigger",
+        description = """
+            When set, the trigger calls `fluxSink.error(...)` after this many consecutive failure spins,
+            terminating the flow with an error. When absent (default), the trigger retries indefinitely.
+            """
+    )
+    @PluginProperty(group = "advanced")
+    private Property<Integer> maxReconnectAttempts;
+
     @Builder.Default
     @Getter(AccessLevel.NONE)
     private final AtomicBoolean isActive = new AtomicBoolean(true);
@@ -209,12 +253,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Getter(AccessLevel.NONE)
     private final AtomicReference<ShareConsumer<Object, Object>> shareConsumer = new AtomicReference<>();
 
-    @Schema(
-        title = "Filter messages by Kafka headers",
-        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
-    )
-    @PluginProperty(group = "advanced")
-    private Property<Map<String, String>> headerFilters;
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    private final AtomicReference<Thread> pollThread = new AtomicReference<>();
 
     protected Consume consumeTask() {
         return Consume.builder()
@@ -258,6 +299,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 var rKeyDeserializer = runContext.render(this.keyDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
                 var rValueDeserializer = runContext.render(this.valueDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
                 var bootstrapServers = rProperties.get("bootstrap.servers");
+                var rPollDuration = runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(2));
+                var rReconnectBackoffMax = runContext.render(this.reconnectBackoffMax).as(Duration.class).orElse(Duration.ofSeconds(30));
+                var rMaxReconnectAttempts = runContext.render(this.maxReconnectAttempts).as(Integer.class).orElse(null);
 
                 logger.debug(
                     "Starting Kafka trigger triggerId={} bootstrap.servers={} groupId={} groupType={} topics={} topicPattern={} partitions={} keyDeserializer={} valueDeserializer={}",
@@ -267,9 +311,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 );
 
                 if (rGroupType == GroupType.SHARE) {
-                    runWithShareConsumer(task, runContext, fluxSink);
+                    runWithShareConsumer(task, runContext, fluxSink, rPollDuration, rReconnectBackoffMax, rMaxReconnectAttempts);
                 } else {
-                    runWithConsumer(task, runContext, fluxSink);
+                    runWithConsumer(task, runContext, fluxSink, rPollDuration, rReconnectBackoffMax, rMaxReconnectAttempts);
                 }
             } catch (WakeupException e) {
                 logger.debug("Kafka trigger triggerId={} woken up; stopping poll loop", this.id);
@@ -285,7 +329,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     private void runWithConsumer(Consume task,
                                  RunContext runContext,
-                                 FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
+                                 FluxSink<ConsumerRecord<Object, Object>> fluxSink,
+                                 Duration pollDuration,
+                                 Duration reconnectBackoffMax,
+                                 Integer maxReconnectAttempts) throws Exception {
         Logger logger = runContext.logger();
         try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
             this.consumer.set(consumer);
@@ -316,8 +363,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 this.partitions
             );
 
-            runPollingLoop(() -> {
-                var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
+            runPollingLoop(logger, fluxSink, reconnectBackoffMax, maxReconnectAttempts, () -> {
+                var records = consumer.poll(pollDuration);
                 task.processConsumerRecords(runContext, records, fluxSink::next);
                 consumer.commitSync();
             });
@@ -326,7 +373,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     private void runWithShareConsumer(Consume task,
                                       RunContext runContext,
-                                      FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
+                                      FluxSink<ConsumerRecord<Object, Object>> fluxSink,
+                                      Duration pollDuration,
+                                      Duration reconnectBackoffMax,
+                                      Integer maxReconnectAttempts) throws Exception {
         Logger logger = runContext.logger();
         task.validateShareConfiguration();
         try (var consumer = task.shareConsumer(runContext)) {
@@ -343,8 +393,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             );
 
             var firstShareBatch = new AtomicBoolean(false);
-            runPollingLoop(() -> {
-                var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
+            runPollingLoop(logger, fluxSink, reconnectBackoffMax, maxReconnectAttempts, () -> {
+                var records = consumer.poll(pollDuration);
                 // compareAndSet flips the flag and returns true only on the first non-empty batch, so this logs once
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
                     logger.debug("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
@@ -355,16 +405,94 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         }
     }
 
-    private void runPollingLoop(PollAction pollAction) throws Exception {
+    /**
+     * Runs the poll loop with exponential backoff when the broker is unreachable.
+     *
+     * A poll iteration is a "failure spin" when it throws any exception other than InterruptException.
+     * When Kafka cannot connect to any broker (connection refused, TLS error, invalid protocol response,
+     * etc.) it will throw after its internal retry window, which is controlled by `request.timeout.ms`.
+     * On a failure spin the loop sleeps with exponential backoff before the next attempt.
+     * Backoff resets to zero as soon as a poll succeeds without throwing.
+     * The backoff sleep is interruptible so stop()/kill() terminate promptly.
+     */
+    private void runPollingLoop(Logger logger,
+                                FluxSink<ConsumerRecord<Object, Object>> fluxSink,
+                                Duration reconnectBackoffMax,
+                                Integer maxReconnectAttempts,
+                                PollAction pollAction) throws Exception {
+        final long backoffCapMs = reconnectBackoffMax.toMillis();
+        long currentBackoffMs = 0;
+        int failureSpins = 0;
+        boolean inRetryState = false;
+
+        pollThread.set(Thread.currentThread());
+
         while (isActive.get()) {
+            boolean pollFailed = false;
+
             try {
                 pollAction.run();
             } catch (org.apache.kafka.common.errors.InterruptException e) {
-                // ignore, this case is handle by next lines
+                // ignore, handled by isInterrupted check below
+            } catch (Exception e) {
+                pollFailed = true;
+                if (!inRetryState) {
+                    logger.warn(
+                        "Kafka trigger triggerId={} broker unreachable ({}); will retry with backoff",
+                        this.id, e.getMessage()
+                    );
+                }
             }
-            // Check if the current thread has been interrupted before next poll.
+
             if (Thread.currentThread().isInterrupted()) {
-                isActive.set(false); // proactively stop polling
+                isActive.set(false);
+                break;
+            }
+
+            if (pollFailed) {
+                failureSpins++;
+
+                if (maxReconnectAttempts != null && failureSpins > maxReconnectAttempts) {
+                    var msg = String.format(
+                        "Kafka trigger triggerId=%s exceeded maxReconnectAttempts=%d; failing trigger",
+                        this.id, maxReconnectAttempts
+                    );
+                    logger.error(msg);
+                    fluxSink.error(new RuntimeException(msg));
+                    isActive.set(false);
+                    break;
+                }
+
+                // exponential backoff: 1s → 2s → 4s → … → cap
+                long nextBackoffMs = currentBackoffMs == 0
+                    ? 1_000L
+                    : Math.min(currentBackoffMs * 2, backoffCapMs);
+
+                if (nextBackoffMs != currentBackoffMs || !inRetryState) {
+                    logger.warn(
+                        "Kafka trigger triggerId={} retrying (attempt #{}) after {}ms backoff",
+                        this.id, failureSpins, nextBackoffMs
+                    );
+                }
+
+                currentBackoffMs = nextBackoffMs;
+                inRetryState = true;
+
+                // interruptible sleep — wakeup()/stop()/kill() break out immediately
+                try {
+                    Thread.sleep(currentBackoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    isActive.set(false);
+                    break;
+                }
+            } else {
+                if (inRetryState) {
+                    logger.debug("Kafka trigger triggerId={} reconnected; resetting backoff", this.id);
+                }
+                currentBackoffMs = 0;
+                failureSpins = 0;
+                inRetryState = false;
             }
         }
     }
@@ -402,6 +530,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         var hasConsumer = consumer.get() != null || shareConsumer.get() != null;
         Optional.ofNullable(consumer.get()).ifPresent(Consumer::wakeup);
         Optional.ofNullable(shareConsumer.get()).ifPresent(ShareConsumer::wakeup);
+        // interrupt the poll thread so that backoff sleeps wake up immediately
+        Optional.ofNullable(pollThread.get()).ifPresent(Thread::interrupt);
 
         if (wait && hasConsumer) {
             try {

@@ -27,6 +27,9 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.util.concurrent.Executors;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -231,6 +234,191 @@ class RealtimeTriggerTest {
             );
         } finally {
             triggerLogger.detachAppender(listAppender);
+        }
+    }
+
+    /**
+     * Starts a server socket that accepts connections and keeps them open without sending any data.
+     * Kafka connects successfully but times out waiting for protocol responses, eventually throwing
+     * TimeoutException when request.timeout.ms is exceeded. This is more reliable than accept-and-close
+     * (which Kafka handles silently) across different OS/network configurations.
+     * The caller is responsible for closing the returned socket after the test.
+     */
+    private static ServerSocket startNonKafkaServer() throws IOException {
+        var server = new ServerSocket(0);
+        var executor = Executors.newSingleThreadExecutor();
+        executor.submit(() -> {
+            var openSockets = new java.util.ArrayList<java.net.Socket>();
+            while (!server.isClosed()) {
+                try {
+                    // accept and keep open — Kafka's request will time out waiting for response
+                    openSockets.add(server.accept());
+                } catch (IOException ignored) {
+                    // server closed — clean up
+                    openSockets.forEach(s -> { try { s.close(); } catch (IOException ignored2) {} });
+                }
+            }
+        });
+        executor.shutdown();
+        return server;
+    }
+
+    @Test
+    void shouldBackOffWhenBrokerUnreachable_consumer() throws Exception {
+        var triggerId = IdUtils.create();
+
+        // Hanging server: accepts connections but never responds. Kafka polls return empty or
+        // throw (after request.timeout.ms). Either way the trigger must not crash.
+        try (var fakeServer = startNonKafkaServer()) {
+            var trigger = RealtimeTrigger.builder()
+                .id(triggerId)
+                .type(RealtimeTrigger.class.getName())
+                .topic("dead-broker-topic")
+                .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "request.timeout.ms", "1000",
+                    "default.api.timeout.ms", "1000",
+                    "reconnect.backoff.ms", "50",
+                    "reconnect.backoff.max.ms", "100"
+                )))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(3)))
+                .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(2)))
+                .build();
+
+            RunContext runContext = runContextFactory.of(Map.of());
+            Consume task = trigger.consumeTask();
+            var errors = new CopyOnWriteArrayList<Throwable>();
+            var completedLatch = new CountDownLatch(1);
+
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, err -> {
+                    errors.add(err);
+                    completedLatch.countDown();
+                }, completedLatch::countDown);
+
+            // Let it run for a bounded window then stop
+            Thread.sleep(Duration.ofSeconds(6).toMillis());
+            trigger.stop();
+
+            // Trigger must stay alive (retrying) — must NOT have crashed with an error
+            assertThat("Trigger must not fail with an error during backoff retries", errors, empty());
+
+            boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+            assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
+        }
+    }
+
+    @Test
+    void shouldFailAfterMaxReconnectAttempts() throws Exception {
+        var triggerId = IdUtils.create();
+        // Use a topic with an incompatible deserializer. Produce a plain STRING record, then
+        // consume it with a JSON deserializer — Kafka throws SerializationException from poll().
+        // This is a reliable way to trigger exception-based failure spins against the real broker.
+        // fixed topic name so CI reuses it across runs; auto-created on first use
+        var topic = "tu_max_reconnect";
+
+        // Produce one record with STRING serializer (non-transactional for simplicity)
+        Produce producer = Produce.builder()
+            .id(IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "max.block.ms", "5000"
+            )))
+            .transactional(Property.ofValue(false))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(List.of(Map.of("key", "k", "value", "not-valid-json")))
+            .build();
+        producer.run(TestsUtils.mockRunContext(runContextFactory, producer, Map.of()));
+
+        var trigger = RealtimeTrigger.builder()
+            .id(triggerId)
+            .type(RealtimeTrigger.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "auto.offset.reset", "earliest"
+            )))
+            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            // JSON deserializer on a non-JSON value causes SerializationException in poll().
+            // serdeProperties points at the real registry so configure() succeeds; the error
+            // fires at deserialize() time when parsing the raw STRING bytes.
+            .valueDeserializer(Property.ofValue(SerdeType.JSON))
+            .maxReconnectAttempts(Property.ofValue(1))
+            .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(500)))
+            .build();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = trigger.consumeTask();
+        var errors = new CopyOnWriteArrayList<Throwable>();
+        var completedLatch = new CountDownLatch(1);
+
+        Flux.from(trigger.publisher(task, runContext))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(record -> {}, err -> {
+                errors.add(err);
+                completedLatch.countDown();
+            }, completedLatch::countDown);
+
+        // 1 exception (SerializationException) + 1 backoff ≈ 2-5s; 30s is generous
+        boolean completed = completedLatch.await(30, TimeUnit.SECONDS);
+        assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
+        assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
+        assertThat(
+            "Error message must mention maxReconnectAttempts",
+            errors.getFirst().getMessage(),
+            containsString("maxReconnectAttempts=1")
+        );
+    }
+
+    @Test
+    void shouldTerminatePromptlyDuringBackoff() throws Exception {
+        var triggerId = IdUtils.create();
+
+        try (var fakeServer = startNonKafkaServer()) {
+            var trigger = RealtimeTrigger.builder()
+                .id(triggerId)
+                .type(RealtimeTrigger.class.getName())
+                .topic("dead-broker-topic")
+                .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "request.timeout.ms", "1000",
+                    "default.api.timeout.ms", "1000",
+                    "reconnect.backoff.ms", "50",
+                    "reconnect.backoff.max.ms", "100"
+                )))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(3)))
+                // large backoff so stop() definitely interrupts a sleep (if exceptions fire)
+                // or wakeup() interrupts the poll (if Kafka returns silently)
+                .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(30)))
+                .build();
+
+            RunContext runContext = runContextFactory.of(Map.of());
+            Consume task = trigger.consumeTask();
+            var completedLatch = new CountDownLatch(1);
+
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
+
+            // Wait until the loop has had time to run at least one poll
+            Thread.sleep(Duration.ofSeconds(5).toMillis());
+
+            long stopStart = System.currentTimeMillis();
+            trigger.stop();
+            // wakeup() breaks any ongoing poll; Thread::interrupt breaks any backoff sleep
+            boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+            long stopMs = System.currentTimeMillis() - stopStart;
+
+            assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
+            assertThat("stop() must not block longer than 5s", stopMs, lessThan(5000L));
         }
     }
 
