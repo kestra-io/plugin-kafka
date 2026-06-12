@@ -264,11 +264,11 @@ class RealtimeTriggerTest {
     }
 
     @Test
-    void shouldBackOffWhenBrokerUnreachable_consumer() throws Exception {
+    void shouldNotBusyLoopWhenBrokerUnreachable_consumer() throws Exception {
         var triggerId = IdUtils.create();
 
-        // Hanging server: accepts connections but never responds. Kafka polls return empty or
-        // throw (after request.timeout.ms). Either way the trigger must not crash.
+        // Hanging server: accepts connections but never responds. The bounded poll timeout keeps
+        // the loop from busy-spinning; polls return empty without crashing the trigger.
         try (var fakeServer = startNonKafkaServer()) {
             var trigger = RealtimeTrigger.builder()
                 .id(triggerId)
@@ -300,8 +300,8 @@ class RealtimeTriggerTest {
             Thread.sleep(Duration.ofSeconds(6).toMillis());
             trigger.stop();
 
-            // Trigger must stay alive (retrying) — must NOT have crashed with an error
-            assertThat("Trigger must not fail with an error during backoff retries", errors, empty());
+            // Trigger must stay alive (polling) — must NOT have crashed with an error
+            assertThat("Trigger must not fail with an error while the broker is unreachable", errors, empty());
 
             boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
             assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
@@ -309,7 +309,7 @@ class RealtimeTriggerTest {
     }
 
     @Test
-    void shouldBackOffWhenBrokerUnreachable_share() throws Exception {
+    void shouldNotBusyLoopWhenBrokerUnreachable_share() throws Exception {
         var triggerId = IdUtils.create();
 
         try (var fakeServer = startNonKafkaServer()) {
@@ -343,7 +343,7 @@ class RealtimeTriggerTest {
             Thread.sleep(Duration.ofSeconds(6).toMillis());
             trigger.stop();
 
-            assertThat("SHARE trigger must not fail with an error during backoff retries", errors, empty());
+            assertThat("SHARE trigger must not fail with an error while the broker is unreachable", errors, empty());
 
             boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
             assertThat("SHARE trigger must terminate within 5s of stop()", terminated, is(true));
@@ -351,7 +351,7 @@ class RealtimeTriggerTest {
     }
 
     @Test
-    void shouldTerminatePromptlyDuringBackoff() throws Exception {
+    void shouldTerminatePromptlyWhenBrokerUnreachable() throws Exception {
         var triggerId = IdUtils.create();
 
         try (var fakeServer = startNonKafkaServer()) {
@@ -377,12 +377,12 @@ class RealtimeTriggerTest {
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
 
-            // Wait until the loop has had time to run at least one poll and enter backoff
+            // Wait until the loop has had time to run at least one poll against the dead broker
             Thread.sleep(Duration.ofSeconds(5).toMillis());
 
             long stopStart = System.currentTimeMillis();
             trigger.stop();
-            // wakeup() breaks any ongoing poll; Thread::interrupt breaks any backoff sleep
+            // wakeup() breaks the blocking poll so the loop exits promptly
             boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
             long stopMs = System.currentTimeMillis() - stopStart;
 
