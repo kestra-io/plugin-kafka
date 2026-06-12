@@ -138,6 +138,12 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 )
 public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerInterface, TriggerOutput<Message>, KafkaConnectionInterface, KafkaConsumerInterface {
+
+    // How long a single consumer.poll() call may block. A finite value prevents the poll loop
+    // from busy-spinning when the broker is unreachable: poll() blocks for at most this duration
+    // before the loop re-checks isActive and polls again. (Long.MAX_VALUE here would spin.)
+    private static final Duration POLL_DURATION = Duration.ofSeconds(2);
+
     private Property<Map<String, String>> properties;
 
     @Builder.Default
@@ -317,7 +323,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             );
 
             runPollingLoop(() -> {
-                var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
+                var records = consumer.poll(POLL_DURATION);
                 task.processConsumerRecords(runContext, records, fluxSink::next);
                 consumer.commitSync();
             });
@@ -344,7 +350,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
             var firstShareBatch = new AtomicBoolean(false);
             runPollingLoop(() -> {
-                var records = consumer.poll(Duration.ofMillis(Long.MAX_VALUE));
+                var records = consumer.poll(POLL_DURATION);
                 // compareAndSet flips the flag and returns true only on the first non-empty batch, so this logs once
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
                     logger.debug("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
