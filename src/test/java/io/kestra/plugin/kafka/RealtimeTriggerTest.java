@@ -282,8 +282,6 @@ class RealtimeTriggerTest {
                     "reconnect.backoff.ms", "50",
                     "reconnect.backoff.max.ms", "100"
                 )))
-                .pollDuration(Property.ofValue(Duration.ofSeconds(3)))
-                .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(2)))
                 .build();
 
             RunContext runContext = runContextFactory.of(Map.of());
@@ -311,70 +309,45 @@ class RealtimeTriggerTest {
     }
 
     @Test
-    void shouldFailAfterMaxReconnectAttempts() throws Exception {
+    void shouldBackOffWhenBrokerUnreachable_share() throws Exception {
         var triggerId = IdUtils.create();
-        // Use a topic with an incompatible deserializer. Produce a plain STRING record, then
-        // consume it with a JSON deserializer — Kafka throws SerializationException from poll().
-        // This is a reliable way to trigger exception-based failure spins against the real broker.
-        // fixed topic name so CI reuses it across runs; auto-created on first use
-        var topic = "tu_max_reconnect";
 
-        // Produce one record with STRING serializer (non-transactional for simplicity)
-        Produce producer = Produce.builder()
-            .id(IdUtils.create())
-            .type(Produce.class.getName())
-            .properties(Property.ofValue(Map.of(
-                "bootstrap.servers", this.bootstrap,
-                "max.block.ms", "5000"
-            )))
-            .transactional(Property.ofValue(false))
-            .keySerializer(Property.ofValue(SerdeType.STRING))
-            .valueSerializer(Property.ofValue(SerdeType.STRING))
-            .topic(Property.ofValue(topic))
-            .from(List.of(Map.of("key", "k", "value", "not-valid-json")))
-            .build();
-        producer.run(TestsUtils.mockRunContext(runContextFactory, producer, Map.of()));
+        try (var fakeServer = startNonKafkaServer()) {
+            var trigger = RealtimeTrigger.builder()
+                .id(triggerId)
+                .type(RealtimeTrigger.class.getName())
+                .topic("dead-broker-topic-share")
+                .groupId(Property.ofValue("test-share-group-" + IdUtils.create()))
+                .groupType(Property.ofValue(GroupType.SHARE))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "request.timeout.ms", "1000",
+                    "default.api.timeout.ms", "1000",
+                    "reconnect.backoff.ms", "50",
+                    "reconnect.backoff.max.ms", "100"
+                )))
+                .build();
 
-        var trigger = RealtimeTrigger.builder()
-            .id(triggerId)
-            .type(RealtimeTrigger.class.getName())
-            .topic(topic)
-            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
-            .properties(Property.ofValue(Map.of(
-                "bootstrap.servers", this.bootstrap,
-                "auto.offset.reset", "earliest"
-            )))
-            .serdeProperties(Property.ofValue(Map.of("schema.registry.url", this.registry)))
-            .keyDeserializer(Property.ofValue(SerdeType.STRING))
-            // JSON deserializer on a non-JSON value causes SerializationException in poll().
-            // serdeProperties points at the real registry so configure() succeeds; the error
-            // fires at deserialize() time when parsing the raw STRING bytes.
-            .valueDeserializer(Property.ofValue(SerdeType.JSON))
-            .maxReconnectAttempts(Property.ofValue(1))
-            .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(500)))
-            .build();
+            RunContext runContext = runContextFactory.of(Map.of());
+            Consume task = trigger.consumeTask();
+            var errors = new CopyOnWriteArrayList<Throwable>();
+            var completedLatch = new CountDownLatch(1);
 
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = trigger.consumeTask();
-        var errors = new CopyOnWriteArrayList<Throwable>();
-        var completedLatch = new CountDownLatch(1);
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, err -> {
+                    errors.add(err);
+                    completedLatch.countDown();
+                }, completedLatch::countDown);
 
-        Flux.from(trigger.publisher(task, runContext))
-            .subscribeOn(Schedulers.boundedElastic())
-            .subscribe(record -> {}, err -> {
-                errors.add(err);
-                completedLatch.countDown();
-            }, completedLatch::countDown);
+            Thread.sleep(Duration.ofSeconds(6).toMillis());
+            trigger.stop();
 
-        // 1 exception (SerializationException) + 1 backoff ≈ 2-5s; 30s is generous
-        boolean completed = completedLatch.await(30, TimeUnit.SECONDS);
-        assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
-        assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
-        assertThat(
-            "Error message must mention maxReconnectAttempts",
-            errors.getFirst().getMessage(),
-            containsString("maxReconnectAttempts=1")
-        );
+            assertThat("SHARE trigger must not fail with an error during backoff retries", errors, empty());
+
+            boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+            assertThat("SHARE trigger must terminate within 5s of stop()", terminated, is(true));
+        }
     }
 
     @Test
@@ -394,10 +367,6 @@ class RealtimeTriggerTest {
                     "reconnect.backoff.ms", "50",
                     "reconnect.backoff.max.ms", "100"
                 )))
-                .pollDuration(Property.ofValue(Duration.ofSeconds(3)))
-                // large backoff so stop() definitely interrupts a sleep (if exceptions fire)
-                // or wakeup() interrupts the poll (if Kafka returns silently)
-                .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(30)))
                 .build();
 
             RunContext runContext = runContextFactory.of(Map.of());
@@ -408,7 +377,7 @@ class RealtimeTriggerTest {
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
 
-            // Wait until the loop has had time to run at least one poll
+            // Wait until the loop has had time to run at least one poll and enter backoff
             Thread.sleep(Duration.ofSeconds(5).toMillis());
 
             long stopStart = System.currentTimeMillis();
