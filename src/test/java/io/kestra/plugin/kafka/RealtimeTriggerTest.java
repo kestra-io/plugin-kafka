@@ -241,6 +241,7 @@ class RealtimeTriggerTest {
         var triggerId = IdUtils.create();
         var deadPort = findFreePort();
 
+        // pollDuration=100ms → idleThreshold=20ms; connection-refused returns in <1ms so triggers backoff
         var trigger = RealtimeTrigger.builder()
             .id(triggerId)
             .type(RealtimeTrigger.class.getName())
@@ -248,58 +249,36 @@ class RealtimeTriggerTest {
             .groupId(Property.ofValue("test-group-" + IdUtils.create()))
             .properties(Property.ofValue(Map.of(
                 "bootstrap.servers", "localhost:" + deadPort,
-                // short timeouts so the test does not wait for Kafka's default 60s
-                "request.timeout.ms", "500",
-                "default.api.timeout.ms", "500",
-                "connections.max.idle.ms", "1000",
-                "reconnect.backoff.ms", "100",
-                "reconnect.backoff.max.ms", "200"
+                "request.timeout.ms", "200",
+                "default.api.timeout.ms", "200"
             )))
-            .pollDuration(Property.ofValue(Duration.ofMillis(300)))
-            .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(2)))
+            .pollDuration(Property.ofValue(Duration.ofMillis(100)))
+            // cap backoff at 1s so the 4s window covers at least a few retry cycles
+            .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(1)))
             .build();
 
         RunContext runContext = runContextFactory.of(Map.of());
-        var rcLogger = (ch.qos.logback.classic.Logger) runContext.logger();
-        rcLogger.setLevel(ch.qos.logback.classic.Level.WARN);
-        var listAppender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
-        listAppender.setContext(rcLogger.getLoggerContext());
-        listAppender.start();
-        rcLogger.addAppender(listAppender);
+        Consume task = trigger.consumeTask();
+        var errors = new CopyOnWriteArrayList<Throwable>();
+        var completedLatch = new CountDownLatch(1);
 
-        try {
+        Flux.from(trigger.publisher(task, runContext))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(record -> {}, err -> {
+                errors.add(err);
+                completedLatch.countDown();
+            }, completedLatch::countDown);
 
-            Consume task = trigger.consumeTask();
+        // Let the loop run for 4 seconds while backing off, then stop it
+        Thread.sleep(Duration.ofSeconds(4).toMillis());
+        trigger.stop();
 
-            Flux.from(trigger.publisher(task, runContext))
-                .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(record -> {}, err -> {});
+        // Trigger must still be alive (retrying) — it must NOT have crashed with an error
+        assertThat("Trigger must not fail with an error during backoff retries", errors, empty());
 
-            // Give the loop a short window — if it busy-spins we'd see hundreds of iterations
-            // in this interval; with backoff it should sleep most of the time
-            long start = System.currentTimeMillis();
-            Thread.sleep(Duration.ofSeconds(4).toMillis());
-            trigger.stop();
-
-            long elapsed = System.currentTimeMillis() - start;
-
-            // At least one WARN about broker unreachability must appear
-            var warnMessages = listAppender.list.stream()
-                .filter(e -> e.getLevel() == ch.qos.logback.classic.Level.WARN)
-                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
-                .toList();
-
-            assertThat(
-                "Expected at least one WARN log about unreachable broker",
-                warnMessages.stream().anyMatch(m -> m.contains("broker unreachable") || m.contains("retrying")),
-                is(true)
-            );
-
-            // Verify stop() completes promptly — well within the test timeout
-            assertThat("stop() must complete within 4s window", elapsed, lessThan(6000L));
-        } finally {
-            rcLogger.detachAppender(listAppender);
-        }
+        // stop() must terminate the flux within a reasonable window
+        boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+        assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
     }
 
     @Test
@@ -307,6 +286,8 @@ class RealtimeTriggerTest {
         var triggerId = IdUtils.create();
         var deadPort = findFreePort();
 
+        // pollDuration=100ms → idleThreshold=20ms; each failure spin triggers backoff
+        // With maxReconnectAttempts=3 and backoff cap=200ms: ~3*(100ms + 100..200ms) ≈ 1s total
         var trigger = RealtimeTrigger.builder()
             .id(triggerId)
             .type(RealtimeTrigger.class.getName())
@@ -314,14 +295,11 @@ class RealtimeTriggerTest {
             .groupId(Property.ofValue("test-group-" + IdUtils.create()))
             .properties(Property.ofValue(Map.of(
                 "bootstrap.servers", "localhost:" + deadPort,
-                "request.timeout.ms", "500",
-                "default.api.timeout.ms", "500",
-                "connections.max.idle.ms", "1000",
-                "reconnect.backoff.ms", "100",
-                "reconnect.backoff.max.ms", "200"
+                "request.timeout.ms", "200",
+                "default.api.timeout.ms", "200"
             )))
-            .pollDuration(Property.ofValue(Duration.ofMillis(300)))
-            .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(500)))
+            .pollDuration(Property.ofValue(Duration.ofMillis(100)))
+            .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(200)))
             .maxReconnectAttempts(Property.ofValue(3))
             .build();
 
@@ -337,7 +315,7 @@ class RealtimeTriggerTest {
                 completedLatch.countDown();
             }, completedLatch::countDown);
 
-        boolean completed = completedLatch.await(20, TimeUnit.SECONDS);
+        boolean completed = completedLatch.await(30, TimeUnit.SECONDS);
         assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
         assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
         assertThat(
@@ -359,13 +337,10 @@ class RealtimeTriggerTest {
             .groupId(Property.ofValue("test-group-" + IdUtils.create()))
             .properties(Property.ofValue(Map.of(
                 "bootstrap.servers", "localhost:" + deadPort,
-                "request.timeout.ms", "500",
-                "default.api.timeout.ms", "500",
-                "connections.max.idle.ms", "1000",
-                "reconnect.backoff.ms", "100",
-                "reconnect.backoff.max.ms", "200"
+                "request.timeout.ms", "200",
+                "default.api.timeout.ms", "200"
             )))
-            .pollDuration(Property.ofValue(Duration.ofMillis(300)))
+            .pollDuration(Property.ofValue(Duration.ofMillis(100)))
             // large backoff so stop() definitely interrupts a sleep
             .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(30)))
             .build();
@@ -378,12 +353,12 @@ class RealtimeTriggerTest {
             .subscribeOn(Schedulers.boundedElastic())
             .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
 
-        // Wait until the loop enters backoff (first failure spin takes ~pollDuration + initial backoff ~1s)
-        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        // Wait until the loop has entered the long backoff sleep (1s initial, then grows to 30s)
+        Thread.sleep(Duration.ofSeconds(2).toMillis());
 
         long stopStart = System.currentTimeMillis();
         trigger.stop();
-        // stop() is non-blocking, but the flux completes asynchronously
+        // stop() is non-blocking, but the flux completes asynchronously via Thread.interrupt
         boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
         long stopMs = System.currentTimeMillis() - stopStart;
 

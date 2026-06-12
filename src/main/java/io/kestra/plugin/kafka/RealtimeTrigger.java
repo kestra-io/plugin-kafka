@@ -253,6 +253,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Getter(AccessLevel.NONE)
     private final AtomicReference<ShareConsumer<Object, Object>> shareConsumer = new AtomicReference<>();
 
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    private final AtomicReference<Thread> pollThread = new AtomicReference<>();
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -404,12 +408,15 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     }
 
     /**
-     * Runs the poll loop with exponential backoff on failure spins.
+     * Runs the poll loop with exponential backoff when the broker is unreachable.
      *
-     * A poll iteration is a "failure spin" when it either throws a connection/timeout exception
-     * OR it returns near-instantly (well under pollDuration) with zero records. This distinguishes
-     * a healthy idle topic (blocks ~pollDuration, returns empty) from a dead broker (returns instantly).
-     * Backoff resets to zero as soon as any poll delivers records or blocks normally.
+     * A poll iteration is a "failure spin" when it throws any exception other than InterruptException,
+     * OR when it returns in well under pollDuration with zero records (connection-refused / instant fail).
+     * The elapsed-time check catches fast-fail cases (e.g. connection refused) that Kafka surfances
+     * as an empty result rather than an exception. On a healthy idle topic the poll blocks for
+     * approximately the full pollDuration, so this heuristic does not false-trigger.
+     * Backoff resets to zero as soon as a poll delivers records or blocks for the full duration.
+     * The backoff sleep is interruptible so stop()/kill() terminate promptly.
      */
     private void runPollingLoop(Logger logger,
                                 FluxSink<ConsumerRecord<Object, Object>> fluxSink,
@@ -417,12 +424,14 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                                 Duration reconnectBackoffMax,
                                 Integer maxReconnectAttempts,
                                 PollAction pollAction) throws Exception {
-        // idle threshold: a poll blocking for at least 80% of pollDuration is considered healthy
-        final long idleThresholdMs = (long) (pollDuration.toMillis() * 0.8);
+        // polls that return in under 20% of pollDuration with 0 records are treated as failure spins
+        final long idleThresholdMs = pollDuration.toMillis() / 5;
         final long backoffCapMs = reconnectBackoffMax.toMillis();
         long currentBackoffMs = 0;
         int failureSpins = 0;
         boolean inRetryState = false;
+
+        pollThread.set(Thread.currentThread());
 
         while (isActive.get()) {
             long pollStart = System.currentTimeMillis();
@@ -435,7 +444,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 // ignore, handled by isInterrupted check below
             } catch (Exception e) {
                 pollFailed = true;
-                // log only on first failure or when backoff escalates to avoid spam
                 if (!inRetryState) {
                     logger.warn(
                         "Kafka trigger triggerId={} broker unreachable ({}); will retry with backoff",
@@ -450,8 +458,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             }
 
             long elapsed = System.currentTimeMillis() - pollStart;
-
-            // detect a failure spin: exception OR near-instant empty return
+            // detect a failure spin: exception OR near-instant empty return (< 20% of pollDuration)
             boolean isFailureSpin = pollFailed || (recordCount == 0 && elapsed < idleThresholdMs);
 
             if (isFailureSpin) {
@@ -492,7 +499,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                     break;
                 }
             } else {
-                // successful poll: reset backoff
                 if (inRetryState) {
                     logger.debug("Kafka trigger triggerId={} reconnected; resetting backoff", this.id);
                 }
@@ -536,6 +542,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         var hasConsumer = consumer.get() != null || shareConsumer.get() != null;
         Optional.ofNullable(consumer.get()).ifPresent(Consumer::wakeup);
         Optional.ofNullable(shareConsumer.get()).ifPresent(ShareConsumer::wakeup);
+        // interrupt the poll thread so that backoff sleeps wake up immediately
+        Optional.ofNullable(pollThread.get()).ifPresent(Thread::interrupt);
 
         if (wait && hasConsumer) {
             try {
