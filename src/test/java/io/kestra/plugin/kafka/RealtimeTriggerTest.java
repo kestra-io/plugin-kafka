@@ -29,6 +29,7 @@ import reactor.core.scheduler.Schedulers;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.util.concurrent.Executors;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -236,140 +237,163 @@ class RealtimeTriggerTest {
         }
     }
 
+    /**
+     * Starts a server socket that accepts connections but never speaks the Kafka protocol.
+     * Kafka will connect successfully but get garbage/no data, causing it to throw exceptions
+     * during poll() regardless of network filtering (firewall/iptables). The caller is responsible
+     * for closing the returned socket after the test.
+     */
+    private static ServerSocket startNonKafkaServer() throws IOException {
+        var server = new ServerSocket(0);
+        var executor = Executors.newSingleThreadExecutor();
+        // accept connections in background and immediately close them so Kafka gets EOF
+        executor.submit(() -> {
+            while (!server.isClosed()) {
+                try {
+                    server.accept().close();
+                } catch (IOException ignored) {
+                    // server closed — stop accepting
+                }
+            }
+        });
+        executor.shutdown();
+        return server;
+    }
+
     @Test
     void shouldBackOffWhenBrokerUnreachable_consumer() throws Exception {
         var triggerId = IdUtils.create();
-        var deadPort = findFreePort();
 
-        // pollDuration=100ms → idleThreshold=20ms; connection-refused returns in <1ms so triggers backoff
-        var trigger = RealtimeTrigger.builder()
-            .id(triggerId)
-            .type(RealtimeTrigger.class.getName())
-            .topic("dead-broker-topic")
-            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
-            .properties(Property.ofValue(Map.of(
-                "bootstrap.servers", "localhost:" + deadPort,
-                "request.timeout.ms", "200",
-                "default.api.timeout.ms", "200"
-            )))
-            .pollDuration(Property.ofValue(Duration.ofMillis(100)))
-            // cap backoff at 1s so the 4s window covers at least a few retry cycles
-            .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(1)))
-            .build();
+        // Use a server that accepts-and-closes connections; Kafka gets EOF and throws, triggering backoff
+        try (var fakeServer = startNonKafkaServer()) {
+            var trigger = RealtimeTrigger.builder()
+                .id(triggerId)
+                .type(RealtimeTrigger.class.getName())
+                .topic("dead-broker-topic")
+                .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "request.timeout.ms", "500",
+                    "default.api.timeout.ms", "500",
+                    "reconnect.backoff.ms", "100",
+                    "reconnect.backoff.max.ms", "200"
+                )))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+                .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(2)))
+                .build();
 
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = trigger.consumeTask();
-        var errors = new CopyOnWriteArrayList<Throwable>();
-        var completedLatch = new CountDownLatch(1);
+            RunContext runContext = runContextFactory.of(Map.of());
+            Consume task = trigger.consumeTask();
+            var errors = new CopyOnWriteArrayList<Throwable>();
+            var completedLatch = new CountDownLatch(1);
 
-        Flux.from(trigger.publisher(task, runContext))
-            .subscribeOn(Schedulers.boundedElastic())
-            .subscribe(record -> {}, err -> {
-                errors.add(err);
-                completedLatch.countDown();
-            }, completedLatch::countDown);
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, err -> {
+                    errors.add(err);
+                    completedLatch.countDown();
+                }, completedLatch::countDown);
 
-        // Let the loop run for 4 seconds while backing off, then stop it
-        Thread.sleep(Duration.ofSeconds(4).toMillis());
-        trigger.stop();
+            // Let the loop run for 6 seconds while backing off, then stop it
+            Thread.sleep(Duration.ofSeconds(6).toMillis());
+            trigger.stop();
 
-        // Trigger must still be alive (retrying) — it must NOT have crashed with an error
-        assertThat("Trigger must not fail with an error during backoff retries", errors, empty());
+            // Trigger must still be alive (retrying) — must NOT have crashed with an error
+            assertThat("Trigger must not fail with an error during backoff retries", errors, empty());
 
-        // stop() must terminate the flux within a reasonable window
-        boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
-        assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
+            boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+            assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
+        }
     }
 
     @Test
     void shouldFailAfterMaxReconnectAttempts() throws Exception {
         var triggerId = IdUtils.create();
-        var deadPort = findFreePort();
 
-        // pollDuration=100ms → idleThreshold=20ms; each failure spin triggers backoff
-        // With maxReconnectAttempts=3 and backoff cap=200ms: ~3*(100ms + 100..200ms) ≈ 1s total
-        var trigger = RealtimeTrigger.builder()
-            .id(triggerId)
-            .type(RealtimeTrigger.class.getName())
-            .topic("dead-broker-topic")
-            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
-            .properties(Property.ofValue(Map.of(
-                "bootstrap.servers", "localhost:" + deadPort,
-                "request.timeout.ms", "200",
-                "default.api.timeout.ms", "200"
-            )))
-            .pollDuration(Property.ofValue(Duration.ofMillis(100)))
-            .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(200)))
-            .maxReconnectAttempts(Property.ofValue(3))
-            .build();
+        // Use a server that accepts-and-closes connections; Kafka gets EOF and throws
+        try (var fakeServer = startNonKafkaServer()) {
+            var trigger = RealtimeTrigger.builder()
+                .id(triggerId)
+                .type(RealtimeTrigger.class.getName())
+                .topic("dead-broker-topic")
+                .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "request.timeout.ms", "500",
+                    "default.api.timeout.ms", "500",
+                    "reconnect.backoff.ms", "100",
+                    "reconnect.backoff.max.ms", "200"
+                )))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+                .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(500)))
+                .maxReconnectAttempts(Property.ofValue(3))
+                .build();
 
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = trigger.consumeTask();
-        var errors = new CopyOnWriteArrayList<Throwable>();
-        var completedLatch = new CountDownLatch(1);
+            RunContext runContext = runContextFactory.of(Map.of());
+            Consume task = trigger.consumeTask();
+            var errors = new CopyOnWriteArrayList<Throwable>();
+            var completedLatch = new CountDownLatch(1);
 
-        Flux.from(trigger.publisher(task, runContext))
-            .subscribeOn(Schedulers.boundedElastic())
-            .subscribe(record -> {}, err -> {
-                errors.add(err);
-                completedLatch.countDown();
-            }, completedLatch::countDown);
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, err -> {
+                    errors.add(err);
+                    completedLatch.countDown();
+                }, completedLatch::countDown);
 
-        boolean completed = completedLatch.await(30, TimeUnit.SECONDS);
-        assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
-        assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
-        assertThat(
-            "Error message must mention maxReconnectAttempts",
-            errors.getFirst().getMessage(),
-            containsString("maxReconnectAttempts=3")
-        );
+            // 3 attempts + backoffs: 3*(500ms request timeout + 100..500ms backoff) ≈ 5s; 30s is safe
+            boolean completed = completedLatch.await(30, TimeUnit.SECONDS);
+            assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
+            assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
+            assertThat(
+                "Error message must mention maxReconnectAttempts",
+                errors.getFirst().getMessage(),
+                containsString("maxReconnectAttempts=3")
+            );
+        }
     }
 
     @Test
     void shouldTerminatePromptlyDuringBackoff() throws Exception {
         var triggerId = IdUtils.create();
-        var deadPort = findFreePort();
 
-        var trigger = RealtimeTrigger.builder()
-            .id(triggerId)
-            .type(RealtimeTrigger.class.getName())
-            .topic("dead-broker-topic")
-            .groupId(Property.ofValue("test-group-" + IdUtils.create()))
-            .properties(Property.ofValue(Map.of(
-                "bootstrap.servers", "localhost:" + deadPort,
-                "request.timeout.ms", "200",
-                "default.api.timeout.ms", "200"
-            )))
-            .pollDuration(Property.ofValue(Duration.ofMillis(100)))
-            // large backoff so stop() definitely interrupts a sleep
-            .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(30)))
-            .build();
+        try (var fakeServer = startNonKafkaServer()) {
+            var trigger = RealtimeTrigger.builder()
+                .id(triggerId)
+                .type(RealtimeTrigger.class.getName())
+                .topic("dead-broker-topic")
+                .groupId(Property.ofValue("test-group-" + IdUtils.create()))
+                .properties(Property.ofValue(Map.of(
+                    "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "request.timeout.ms", "500",
+                    "default.api.timeout.ms", "500",
+                    "reconnect.backoff.ms", "100",
+                    "reconnect.backoff.max.ms", "200"
+                )))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+                // large backoff so stop() definitely interrupts a sleep
+                .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(30)))
+                .build();
 
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = trigger.consumeTask();
-        var completedLatch = new CountDownLatch(1);
+            RunContext runContext = runContextFactory.of(Map.of());
+            Consume task = trigger.consumeTask();
+            var completedLatch = new CountDownLatch(1);
 
-        Flux.from(trigger.publisher(task, runContext))
-            .subscribeOn(Schedulers.boundedElastic())
-            .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
+            Flux.from(trigger.publisher(task, runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> {}, err -> completedLatch.countDown(), completedLatch::countDown);
 
-        // Wait until the loop has entered the long backoff sleep (1s initial, then grows to 30s)
-        Thread.sleep(Duration.ofSeconds(2).toMillis());
+            // Wait until the loop has entered the long backoff sleep (initial 1s backoff)
+            Thread.sleep(Duration.ofSeconds(4).toMillis());
 
-        long stopStart = System.currentTimeMillis();
-        trigger.stop();
-        // stop() is non-blocking, but the flux completes asynchronously via Thread.interrupt
-        boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
-        long stopMs = System.currentTimeMillis() - stopStart;
+            long stopStart = System.currentTimeMillis();
+            trigger.stop();
+            // stop() is non-blocking; Thread::interrupt wakes up the backoff sleep immediately
+            boolean terminated = completedLatch.await(5, TimeUnit.SECONDS);
+            long stopMs = System.currentTimeMillis() - stopStart;
 
-        assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
-        assertThat("stop() must not block longer than 5s", stopMs, lessThan(5000L));
-    }
-
-    private static int findFreePort() throws IOException {
-        try (var socket = new ServerSocket(0)) {
-            // close the socket so the port is released; we just need an unused port number
-            return socket.getLocalPort();
+            assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
+            assertThat("stop() must not block longer than 5s", stopMs, lessThan(5000L));
         }
     }
 

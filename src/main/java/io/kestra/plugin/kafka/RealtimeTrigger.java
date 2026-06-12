@@ -363,11 +363,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 this.partitions
             );
 
-            runPollingLoop(logger, fluxSink, pollDuration, reconnectBackoffMax, maxReconnectAttempts, () -> {
+            runPollingLoop(logger, fluxSink, reconnectBackoffMax, maxReconnectAttempts, () -> {
                 var records = consumer.poll(pollDuration);
                 task.processConsumerRecords(runContext, records, fluxSink::next);
                 consumer.commitSync();
-                return records.count();
             });
         }
     }
@@ -394,7 +393,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             );
 
             var firstShareBatch = new AtomicBoolean(false);
-            runPollingLoop(logger, fluxSink, pollDuration, reconnectBackoffMax, maxReconnectAttempts, () -> {
+            runPollingLoop(logger, fluxSink, reconnectBackoffMax, maxReconnectAttempts, () -> {
                 var records = consumer.poll(pollDuration);
                 // compareAndSet flips the flag and returns true only on the first non-empty batch, so this logs once
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
@@ -402,7 +401,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 }
                 task.processShareConsumerRecords(runContext, consumer, records, fluxSink::next);
                 consumer.commitSync();
-                return records.count();
             });
         }
     }
@@ -410,22 +408,18 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     /**
      * Runs the poll loop with exponential backoff when the broker is unreachable.
      *
-     * A poll iteration is a "failure spin" when it throws any exception other than InterruptException,
-     * OR when it returns in well under pollDuration with zero records (connection-refused / instant fail).
-     * The elapsed-time check catches fast-fail cases (e.g. connection refused) that Kafka surfances
-     * as an empty result rather than an exception. On a healthy idle topic the poll blocks for
-     * approximately the full pollDuration, so this heuristic does not false-trigger.
-     * Backoff resets to zero as soon as a poll delivers records or blocks for the full duration.
+     * A poll iteration is a "failure spin" when it throws any exception other than InterruptException.
+     * When Kafka cannot connect to any broker (connection refused, TLS error, invalid protocol response,
+     * etc.) it will throw after its internal retry window, which is controlled by `request.timeout.ms`.
+     * On a failure spin the loop sleeps with exponential backoff before the next attempt.
+     * Backoff resets to zero as soon as a poll succeeds without throwing.
      * The backoff sleep is interruptible so stop()/kill() terminate promptly.
      */
     private void runPollingLoop(Logger logger,
                                 FluxSink<ConsumerRecord<Object, Object>> fluxSink,
-                                Duration pollDuration,
                                 Duration reconnectBackoffMax,
                                 Integer maxReconnectAttempts,
                                 PollAction pollAction) throws Exception {
-        // polls that return in under 20% of pollDuration with 0 records are treated as failure spins
-        final long idleThresholdMs = pollDuration.toMillis() / 5;
         final long backoffCapMs = reconnectBackoffMax.toMillis();
         long currentBackoffMs = 0;
         int failureSpins = 0;
@@ -434,12 +428,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         pollThread.set(Thread.currentThread());
 
         while (isActive.get()) {
-            long pollStart = System.currentTimeMillis();
-            int recordCount = 0;
             boolean pollFailed = false;
 
             try {
-                recordCount = pollAction.run();
+                pollAction.run();
             } catch (org.apache.kafka.common.errors.InterruptException e) {
                 // ignore, handled by isInterrupted check below
             } catch (Exception e) {
@@ -457,11 +449,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 break;
             }
 
-            long elapsed = System.currentTimeMillis() - pollStart;
-            // detect a failure spin: exception OR near-instant empty return (< 20% of pollDuration)
-            boolean isFailureSpin = pollFailed || (recordCount == 0 && elapsed < idleThresholdMs);
-
-            if (isFailureSpin) {
+            if (pollFailed) {
                 failureSpins++;
 
                 if (maxReconnectAttempts != null && failureSpins > maxReconnectAttempts) {
@@ -511,7 +499,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @FunctionalInterface
     private interface PollAction {
-        int run() throws Exception;
+        void run() throws Exception;
     }
 
     /**
