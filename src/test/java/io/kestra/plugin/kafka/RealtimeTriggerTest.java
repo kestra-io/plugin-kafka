@@ -30,6 +30,7 @@ import reactor.core.scheduler.Schedulers;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -238,21 +239,24 @@ class RealtimeTriggerTest {
     }
 
     /**
-     * Starts a server socket that accepts connections but never speaks the Kafka protocol.
-     * Kafka will connect successfully but get garbage/no data, causing it to throw exceptions
-     * during poll() regardless of network filtering (firewall/iptables). The caller is responsible
-     * for closing the returned socket after the test.
+     * Starts a server socket that accepts connections and sends a garbage payload before closing.
+     * This causes Kafka's network layer to fail the protocol handshake and throw an exception
+     * during poll() rather than silently returning empty (which happens with plain EOF).
+     * The caller is responsible for closing the returned socket after the test.
      */
     private static ServerSocket startNonKafkaServer() throws IOException {
         var server = new ServerSocket(0);
         var executor = Executors.newSingleThreadExecutor();
-        // accept connections in background and immediately close them so Kafka gets EOF
         executor.submit(() -> {
             while (!server.isClosed()) {
                 try {
-                    server.accept().close();
+                    var client = server.accept();
+                    // send garbage to break the Kafka protocol handshake, then close
+                    client.getOutputStream().write(new byte[]{(byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF});
+                    client.getOutputStream().flush();
+                    client.close();
                 } catch (IOException ignored) {
-                    // server closed — stop accepting
+                    // server closed or client error — continue
                 }
             }
         });
@@ -310,7 +314,8 @@ class RealtimeTriggerTest {
     void shouldFailAfterMaxReconnectAttempts() throws Exception {
         var triggerId = IdUtils.create();
 
-        // Use a server that accepts-and-closes connections; Kafka gets EOF and throws
+        // Use SSL with no valid keystore to force Kafka to throw AuthenticationException / SSLException
+        // during every poll attempt. This guarantees exception-based failure spins regardless of network.
         try (var fakeServer = startNonKafkaServer()) {
             var trigger = RealtimeTrigger.builder()
                 .id(triggerId)
@@ -319,13 +324,15 @@ class RealtimeTriggerTest {
                 .groupId(Property.ofValue("test-group-" + IdUtils.create()))
                 .properties(Property.ofValue(Map.of(
                     "bootstrap.servers", "localhost:" + fakeServer.getLocalPort(),
+                    "security.protocol", "SSL",
+                    "ssl.endpoint.identification.algorithm", "",
                     "request.timeout.ms", "500",
                     "default.api.timeout.ms", "500",
-                    "reconnect.backoff.ms", "100",
-                    "reconnect.backoff.max.ms", "200"
+                    "reconnect.backoff.ms", "50",
+                    "reconnect.backoff.max.ms", "100"
                 )))
                 .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
-                .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(500)))
+                .reconnectBackoffMax(Property.ofValue(Duration.ofMillis(200)))
                 .maxReconnectAttempts(Property.ofValue(3))
                 .build();
 
@@ -341,7 +348,7 @@ class RealtimeTriggerTest {
                     completedLatch.countDown();
                 }, completedLatch::countDown);
 
-            // 3 attempts + backoffs: 3*(500ms request timeout + 100..500ms backoff) ≈ 5s; 30s is safe
+            // SSL handshake failure triggers exception quickly; 3 attempts + short backoffs ≈ 5s; 30s is safe
             boolean completed = completedLatch.await(30, TimeUnit.SECONDS);
             assertThat("Trigger must self-terminate after maxReconnectAttempts", completed, is(true));
             assertThat("Expected fluxSink.error() to be called", errors, not(empty()));
