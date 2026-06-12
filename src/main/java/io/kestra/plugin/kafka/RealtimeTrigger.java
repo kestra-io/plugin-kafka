@@ -209,13 +209,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     private Property<String> since;
 
-    @Schema(
-        title = "Filter messages by Kafka headers",
-        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
-    )
-    @PluginProperty(group = "advanced")
-    private Property<Map<String, String>> headerFilters;
-
     @Builder.Default
     @Getter(AccessLevel.NONE)
     private final AtomicBoolean isActive = new AtomicBoolean(true);
@@ -235,6 +228,13 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Builder.Default
     @Getter(AccessLevel.NONE)
     private final AtomicReference<Thread> pollThread = new AtomicReference<>();
+
+    @Schema(
+        title = "Filter messages by Kafka headers",
+        description = "Consume records only when all header key/value pairs match exactly (last header wins, UTF-8 comparison)"
+    )
+    @PluginProperty(group = "advanced")
+    private Property<Map<String, String>> headerFilters;
 
     protected Consume consumeTask() {
         return Consume.builder()
