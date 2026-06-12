@@ -259,26 +259,21 @@ class RealtimeTriggerTest {
             .reconnectBackoffMax(Property.ofValue(Duration.ofSeconds(2)))
             .build();
 
-        var contextLogger = (ch.qos.logback.classic.Logger) runContextFactory.of(Map.of()).logger();
-        contextLogger.setLevel(ch.qos.logback.classic.Level.WARN);
+        RunContext runContext = runContextFactory.of(Map.of());
+        var rcLogger = (ch.qos.logback.classic.Logger) runContext.logger();
+        rcLogger.setLevel(ch.qos.logback.classic.Level.WARN);
         var listAppender = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
-        listAppender.setContext(contextLogger.getLoggerContext());
+        listAppender.setContext(rcLogger.getLoggerContext());
         listAppender.start();
-        contextLogger.addAppender(listAppender);
+        rcLogger.addAppender(listAppender);
 
         try {
-            RunContext runContext = runContextFactory.of(Map.of());
-            // attach appender to the actual run context logger
-            var rcLogger = (ch.qos.logback.classic.Logger) runContext.logger();
-            rcLogger.setLevel(ch.qos.logback.classic.Level.WARN);
-            rcLogger.addAppender(listAppender);
 
             Consume task = trigger.consumeTask();
-            var errorList = new CopyOnWriteArrayList<Throwable>();
 
             Flux.from(trigger.publisher(task, runContext))
                 .subscribeOn(Schedulers.boundedElastic())
-                .subscribe(record -> {}, errorList::add);
+                .subscribe(record -> {}, err -> {});
 
             // Give the loop a short window — if it busy-spins we'd see hundreds of iterations
             // in this interval; with backoff it should sleep most of the time
@@ -303,7 +298,7 @@ class RealtimeTriggerTest {
             // Verify stop() completes promptly — well within the test timeout
             assertThat("stop() must complete within 4s window", elapsed, lessThan(6000L));
         } finally {
-            contextLogger.detachAppender(listAppender);
+            rcLogger.detachAppender(listAppender);
         }
     }
 
