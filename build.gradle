@@ -148,6 +148,12 @@ configurations {
     }
 }
 
+configurations.all {
+    resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
+        select(candidates.find { it.id.group == 'org.lz4' } ?: candidates.first())
+    }
+}
+
 dependencies {
     agent "org.aspectj:aspectjweaver:1.9.25.1"
 }
