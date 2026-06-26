@@ -190,9 +190,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Schema registry vendor."
+        title = "Schema registry vendor"
     )
-    @PluginProperty
+    @PluginProperty(group = "connection")
     private SchemaRegistryVendor schemaRegistryVendor;
 
     private OnSerdeError onSerdeError;

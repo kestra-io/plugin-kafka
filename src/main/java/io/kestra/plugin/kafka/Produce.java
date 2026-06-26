@@ -92,7 +92,7 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
                 inputs:
                   - id: file
                     type: FILE
-                    description: A CSV file with columns: id, username, tweet, and timestamp.
+                    description: "A CSV file with columns: id, username, tweet, and timestamp."
 
                 tasks:
                   - id: csv_to_ion
@@ -170,9 +170,9 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     private Property<SerdeType> valueSerializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Schema registry vendor."
+        title = "Schema registry vendor"
     )
-    @PluginProperty
+    @PluginProperty(group = "connection")
     private SchemaRegistryVendor schemaRegistryVendor;
 
     @Schema(
@@ -381,7 +381,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @io.swagger.v3.oas.annotations.media.Schema(
-            title = "Number of messages sent to a Kafka topic."
+            title = "Number of messages sent to a Kafka topic"
         )
         private final Integer messagesCount;
     }
