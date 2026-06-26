@@ -98,12 +98,12 @@ import java.util.stream.StreamSupport;
                     properties:
                       security.protocol: SSL
                       bootstrap.servers: localhost:19092
-                      ssl.key.password: my-ssl-password
+                      ssl.key.password: "{{ secret('SSL_KEY_PASSWORD') }}"
                       ssl.keystore.type: PKCS12
                       ssl.keystore.location: my-base64-encoded-keystore
-                      ssl.keystore.password: my-ssl-password
+                      ssl.keystore.password: "{{ secret('SSL_KEYSTORE_PASSWORD') }}"
                       ssl.truststore.location: my-base64-encoded-truststore
-                      ssl.truststore.password: my-ssl-password
+                      ssl.truststore.password: "{{ secret('SSL_TRUSTSTORE_PASSWORD') }}"
                     topic:
                       - kestra_workerinstance
                     keyDeserializer: STRING
@@ -231,9 +231,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     private Property<SerdeType> valueDeserializer = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Schema registry vendor."
+        title = "Schema registry vendor"
     )
-    @PluginProperty
+    @PluginProperty(group = "connection")
     private SchemaRegistryVendor schemaRegistryVendor;
 
     @PluginProperty(group = "reliability")
@@ -693,12 +693,12 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
         @Schema(
-            title = "Number of messages consumed from a Kafka topic."
+            title = "Number of messages consumed from a Kafka topic"
         )
         private final Integer messagesCount;
 
         @Schema(
-            title = "URI of a file in Kestra's internal storage containing the messages."
+            title = "URI of a file in Kestra's internal storage containing the messages"
         )
         private URI uri;
     }
