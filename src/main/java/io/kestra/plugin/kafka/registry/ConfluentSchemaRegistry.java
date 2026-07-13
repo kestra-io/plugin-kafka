@@ -62,7 +62,7 @@ import java.util.Map;
 )
 public class ConfluentSchemaRegistry extends SchemaRegistryVendor {
 
-    @Schema(title = "The Confluent Schema Registry URL.")
+    @Schema(title = "The Confluent Schema Registry URL")
     @NotNull
     private Property<String> schemaRegistryUrl;
 

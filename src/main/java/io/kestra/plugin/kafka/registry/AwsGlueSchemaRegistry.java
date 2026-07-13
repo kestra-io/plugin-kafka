@@ -69,20 +69,20 @@ import java.util.Map;
 )
 public class AwsGlueSchemaRegistry extends SchemaRegistryVendor {
 
-    @Schema(title = "The AWS region where the schema registry is located.")
+    @Schema(title = "The AWS region where the schema registry is located")
     @NotNull
     private Property<String> region;
 
-    @Schema(title = "The AWS Glue Schema Registry endpoint. Optional when using IAM roles or standard regional endpoints.")
+    @Schema(title = "The AWS Glue Schema Registry endpoint. Optional when using IAM roles or standard regional endpoints")
     @Nullable
     private Property<String> endpoint;
 
-    @Schema(title = "The AWS access key ID. Optional when using IAM roles or environment credentials.")
+    @Schema(title = "The AWS access key ID. Optional when using IAM roles or environment credentials")
     @Nullable
     @PluginProperty(secret = true)
     private Property<String> accessKey;
 
-    @Schema(title = "The AWS secret access key. Optional when using IAM roles or environment credentials.")
+    @Schema(title = "The AWS secret access key. Optional when using IAM roles or environment credentials")
     @Nullable
     @PluginProperty(secret = true)
     private Property<String> secretKey;
