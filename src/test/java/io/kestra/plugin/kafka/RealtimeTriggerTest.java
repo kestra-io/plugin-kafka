@@ -1,5 +1,11 @@
 package io.kestra.plugin.kafka;
 
+import org.reactivestreams.Publisher;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
+import org.slf4j.LoggerFactory;
+
 
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.Level;
@@ -32,6 +38,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.is;
 
 @KestraTest(startRunner = true, startScheduler = true)
