@@ -15,12 +15,12 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.ListConsumerGroupOffsetsSpec;
 import org.apache.kafka.clients.admin.MemberDescription;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.common.TopicPartition;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,28 +74,37 @@ public class ConsumerGroupDescribe extends AbstractKafkaAdminTask implements Run
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {
             var descriptions = get(admin.describeConsumerGroups(rGroupIds).all(), timeout);
 
-            var groups = new ArrayList<Map<String, Object>>();
-            for (var groupId : rGroupIds) {
-                var description = descriptions.get(groupId);
+            // batched over all groupIds in a single round trip instead of one listConsumerGroupOffsets call per group
+            var groupSpecs = rGroupIds.stream()
+                .collect(Collectors.toMap(groupId -> groupId, groupId -> new ListConsumerGroupOffsetsSpec(), (a, b) -> a));
+            var committedOffsetsByGroup = get(admin.listConsumerGroupOffsets(groupSpecs).all(), timeout);
 
-                var committedOffsets = get(admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata(), timeout);
-                var endOffsets = fetchEndOffsets(admin, committedOffsets.keySet(), timeout);
+            var allPartitions = committedOffsetsByGroup.values().stream()
+                .flatMap(offsets -> offsets.keySet().stream())
+                .collect(Collectors.toSet());
+            var endOffsets = fetchEndOffsets(admin, allPartitions, timeout);
 
-                var offsets = committedOffsets.entrySet().stream()
-                    .map(entry -> offsetEntry(entry.getKey(), entry.getValue().offset(), endOffsets))
-                    .toList();
+            var groups = rGroupIds.stream()
+                .map(groupId -> {
+                    var description = descriptions.get(groupId);
+                    var committedOffsets = committedOffsetsByGroup.getOrDefault(groupId, Map.of());
 
-                var members = description.members().stream()
-                    .map(ConsumerGroupDescribe::memberEntry)
-                    .toList();
+                    var offsets = committedOffsets.entrySet().stream()
+                        .map(entry -> offsetEntry(entry.getKey(), entry.getValue().offset(), endOffsets))
+                        .toList();
 
-                Map<String, Object> group = new LinkedHashMap<>();
-                group.put("groupId", groupId);
-                group.put("state", description.state().toString());
-                group.put("members", members);
-                group.put("offsets", offsets);
-                groups.add(group);
-            }
+                    var members = description.members().stream()
+                        .map(ConsumerGroupDescribe::memberEntry)
+                        .toList();
+
+                    Map<String, Object> group = new LinkedHashMap<>();
+                    group.put("groupId", groupId);
+                    group.put("state", description.state().toString());
+                    group.put("members", members);
+                    group.put("offsets", offsets);
+                    return group;
+                })
+                .toList();
 
             return Output.builder().groups(groups).build();
         }

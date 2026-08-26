@@ -107,14 +107,17 @@ public class ConsumerGroupAlterOffsets extends AbstractKafkaAdminTask implements
     public static class TopicPartitionOffset {
         @Schema(title = "Topic name")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<String> topic;
 
         @Schema(title = "Partition number")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<Integer> partition;
 
         @Schema(title = "Offset to set")
         @NotNull
+        @PluginProperty(group = "main")
         private Property<Long> offset;
 
         TopicPartition toTopicPartition(RunContext runContext) throws IllegalVariableEvaluationException {
