@@ -63,8 +63,7 @@ public class ScramCredentialDelete extends AbstractKafkaAdminTask implements Run
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rUser = runContext.render(this.user).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'user'"));
+        var rUser = requireRendered(runContext, this.user, String.class, "user");
         var rMechanism = runContext.render(this.mechanism).as(ScramMechanism.class).orElse(ScramMechanism.SCRAM_SHA_512);
         var timeout = renderTimeout(runContext);
 

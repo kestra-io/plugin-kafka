@@ -13,6 +13,7 @@ import lombok.experimental.SuperBuilder;
 import org.apache.kafka.common.KafkaFuture;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
@@ -50,6 +51,25 @@ public abstract class AbstractKafkaAdminTask extends Task {
 
     protected Duration renderTimeout(RunContext runContext) throws IllegalVariableEvaluationException {
         return runContext.render(this.timeout).as(Duration.class).orElse(Duration.ofSeconds(30));
+    }
+
+    /**
+     * Renders a required property, failing with a message naming the missing field instead of an opaque
+     * {@code NoSuchElementException}.
+     */
+    protected static <T> T requireRendered(RunContext runContext, Property<T> property, Class<T> type, String fieldName) throws IllegalVariableEvaluationException {
+        return runContext.render(property).as(type)
+            .orElseThrow(() -> new IllegalArgumentException("Missing required property '" + fieldName + "'"));
+    }
+
+    /**
+     * Fails with a message naming the missing field instead of silently proceeding with an empty list.
+     */
+    protected static <T> List<T> requireNonEmpty(List<T> values, String fieldName) {
+        if (values.isEmpty()) {
+            throw new IllegalArgumentException("Missing required property '" + fieldName + "'");
+        }
+        return values;
     }
 
     /**

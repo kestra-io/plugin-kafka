@@ -100,10 +100,8 @@ public class TopicCreate extends AbstractKafkaAdminTask implements RunnableTask<
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rTopic = runContext.render(this.topic).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'topic'"));
-        var rPartitions = runContext.render(this.partitions).as(Integer.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'partitions'"));
+        var rTopic = requireRendered(runContext, this.topic, String.class, "topic");
+        var rPartitions = requireRendered(runContext, this.partitions, Integer.class, "partitions");
         var rReplicationFactor = runContext.render(this.replicationFactor).as(Integer.class).orElse(1);
         var rIfNotExists = runContext.render(this.ifNotExists).as(Boolean.class).orElse(false);
         var rConfigs = runContext.render(this.configs).asMap(String.class, String.class);

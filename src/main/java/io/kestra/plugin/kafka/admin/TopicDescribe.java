@@ -68,8 +68,7 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rTopic = runContext.render(this.topic).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'topic'"));
+        var rTopic = requireRendered(runContext, this.topic, String.class, "topic");
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {

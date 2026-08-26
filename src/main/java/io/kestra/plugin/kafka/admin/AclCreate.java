@@ -102,18 +102,13 @@ public class AclCreate extends AbstractKafkaAdminTask implements RunnableTask<Ac
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rResourceType = runContext.render(this.resourceType).as(ResourceType.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'resourceType'"));
-        var rResourceName = runContext.render(this.resourceName).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'resourceName'"));
+        var rResourceType = requireRendered(runContext, this.resourceType, ResourceType.class, "resourceType");
+        var rResourceName = requireRendered(runContext, this.resourceName, String.class, "resourceName");
         var rPatternType = runContext.render(this.patternType).as(PatternType.class).orElse(PatternType.LITERAL);
-        var rPrincipal = runContext.render(this.principal).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'principal'"));
+        var rPrincipal = requireRendered(runContext, this.principal, String.class, "principal");
         var rHost = runContext.render(this.host).as(String.class).orElse("*");
-        var rOperation = runContext.render(this.operation).as(AclOperation.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'operation'"));
-        var rPermissionType = runContext.render(this.permissionType).as(AclPermissionType.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'permissionType'"));
+        var rOperation = requireRendered(runContext, this.operation, AclOperation.class, "operation");
+        var rPermissionType = requireRendered(runContext, this.permissionType, AclPermissionType.class, "permissionType");
         var timeout = renderTimeout(runContext);
 
         var binding = new AclBinding(

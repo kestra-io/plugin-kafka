@@ -60,10 +60,7 @@ public class TopicDelete extends AbstractKafkaAdminTask implements RunnableTask<
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rTopics = runContext.render(this.topics).asList(String.class);
-        if (rTopics.isEmpty()) {
-            throw new IllegalArgumentException("Missing required property 'topics'");
-        }
+        var rTopics = requireNonEmpty(runContext.render(this.topics).asList(String.class), "topics");
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {

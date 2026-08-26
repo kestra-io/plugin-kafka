@@ -82,8 +82,7 @@ public class TopicUpdate extends AbstractKafkaAdminTask implements RunnableTask<
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rTopic = runContext.render(this.topic).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'topic'"));
+        var rTopic = requireRendered(runContext, this.topic, String.class, "topic");
         var rRetentionMs = runContext.render(this.retentionMs).as(Long.class);
         var rRetentionBytes = runContext.render(this.retentionBytes).as(Long.class);
         var rConfigs = runContext.render(this.configs).asMap(String.class, String.class);

@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.ListConsumerGroupsOptions;
+import org.apache.kafka.clients.admin.ListGroupsOptions;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,14 +52,14 @@ public class ConsumerGroupList extends AbstractKafkaAdminTask implements Runnabl
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {
-            var listings = get(admin.listConsumerGroups(new ListConsumerGroupsOptions()).all(), timeout);
+            var listings = get(admin.listGroups(ListGroupsOptions.forConsumerGroups()).all(), timeout);
 
             var groups = listings.stream()
                 .map(listing -> {
                     Map<String, Object> group = new LinkedHashMap<>();
                     group.put("groupId", listing.groupId());
                     group.put("isSimpleConsumerGroup", listing.isSimpleConsumerGroup());
-                    group.put("state", listing.state().map(Enum::toString).orElse(null));
+                    group.put("state", listing.groupState().map(Enum::toString).orElse(null));
                     return group;
                 })
                 .toList();

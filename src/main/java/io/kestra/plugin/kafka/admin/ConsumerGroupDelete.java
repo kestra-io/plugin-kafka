@@ -59,10 +59,7 @@ public class ConsumerGroupDelete extends AbstractKafkaAdminTask implements Runna
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rGroupIds = runContext.render(this.groupIds).asList(String.class);
-        if (rGroupIds.isEmpty()) {
-            throw new IllegalArgumentException("Missing required property 'groupIds'");
-        }
+        var rGroupIds = requireNonEmpty(runContext.render(this.groupIds).asList(String.class), "groupIds");
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {

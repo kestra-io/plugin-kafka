@@ -65,10 +65,8 @@ public class TopicCreatePartitions extends AbstractKafkaAdminTask implements Run
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rTopic = runContext.render(this.topic).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'topic'"));
-        var rTotalPartitionCount = runContext.render(this.totalPartitionCount).as(Integer.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'totalPartitionCount'"));
+        var rTopic = requireRendered(runContext, this.topic, String.class, "topic");
+        var rTotalPartitionCount = requireRendered(runContext, this.totalPartitionCount, Integer.class, "totalPartitionCount");
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {

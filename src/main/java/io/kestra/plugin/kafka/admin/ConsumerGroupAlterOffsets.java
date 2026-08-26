@@ -72,8 +72,7 @@ public class ConsumerGroupAlterOffsets extends AbstractKafkaAdminTask implements
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rGroupId = runContext.render(this.groupId).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property 'groupId'"));
+        var rGroupId = requireRendered(runContext, this.groupId, String.class, "groupId");
 
         if (this.offsets == null || this.offsets.isEmpty()) {
             throw new IllegalArgumentException("Missing required property 'offsets'");
