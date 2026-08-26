@@ -7,8 +7,6 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -76,8 +74,6 @@ public class ScramCredentialCreate extends AbstractKafkaAdminTask implements Run
         description = "Number of SCRAM hashing iterations, between 4096 and 16384. Defaults to 4096."
     )
     @NotNull
-    @Min(4096)
-    @Max(16384)
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Property<Integer> iterations = Property.ofValue(4096);
@@ -88,6 +84,9 @@ public class ScramCredentialCreate extends AbstractKafkaAdminTask implements Run
         var rPassword = requireRendered(runContext, this.password, String.class, "password");
         var rMechanism = runContext.render(this.mechanism).as(ScramMechanism.class).orElse(ScramMechanism.SCRAM_SHA_512);
         var rIterations = runContext.render(this.iterations).as(Integer.class).orElse(4096);
+        if (rIterations < 4096 || rIterations > 16384) {
+            throw new IllegalArgumentException("Invalid `iterations` value " + rIterations + " — must be between 4096 and 16384");
+        }
         var timeout = renderTimeout(runContext);
 
         var upsertion = new UserScramCredentialUpsertion(

@@ -28,6 +28,27 @@ class ScramCredentialAdminTest {
     }
 
     @Test
+    void createScramCredentialWithOutOfRangeIterationsFails() {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String user = "tu_admin_scram_" + IdUtils.create();
+
+        ScramCredentialCreate create = ScramCredentialCreate.builder()
+            .properties(connection())
+            .user(Property.ofValue(user))
+            .password(Property.ofValue("s3cr3t-password"))
+            .mechanism(Property.ofValue(ScramMechanism.SCRAM_SHA_256))
+            .iterations(Property.ofValue(1))
+            .build();
+
+        IllegalArgumentException exception = org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> create.run(runContext)
+        );
+        assertThat(exception.getMessage(), org.hamcrest.Matchers.containsString("4096"));
+        assertThat(exception.getMessage(), org.hamcrest.Matchers.containsString("16384"));
+    }
+
+    @Test
     void createAndDeleteScramCredential() throws Exception {
         RunContext runContext = runContextFactory.of(Map.of());
         String user = "tu_admin_scram_" + IdUtils.create();
