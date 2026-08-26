@@ -17,15 +17,11 @@ import jakarta.annotation.Nullable;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
-import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.serialization.*;
 
-import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
-
-import static io.kestra.core.utils.Rethrow.throwBiConsumer;
 
 @SuperBuilder
 @ToString
@@ -44,19 +40,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
     protected AtomicReference<Object> dataOnSerdeError = new AtomicReference<>();
 
     protected static Properties createProperties(Property<Map<String, String>> mapProperties, RunContext runContext) throws Exception {
-        Properties properties = new Properties();
-        final Map<String, String> renderedMapProperties = runContext.render(mapProperties).asMap(String.class, String.class);
-        renderedMapProperties
-            .forEach(throwBiConsumer((key, value) -> {
-                if (key.equals(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG) || key.equals(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG)) {
-                    Path path = runContext.workingDir().createTempFile(Base64.getDecoder().decode(value.replace("\n", "")));
-                    properties.put(key, path.toAbsolutePath().toString());
-                } else {
-                    properties.put(key, value);
-                }
-            }));
-
-        return properties;
+        return KafkaClientProperties.create(mapProperties, runContext);
     }
 
     protected static Serializer<?> getTypedSerializer(SerdeType s, @Nullable AvroSchema avroSchema) {

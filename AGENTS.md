@@ -4,6 +4,7 @@
 
 - Provides plugin components under `io.kestra.plugin.kafka`.
 - Includes classes such as `QueueAcknowledgeType`, `Message`, `Consume`, `Produce`.
+- Provides control-plane (AdminClient) tasks under `io.kestra.plugin.kafka.admin` for provisioning multi-tenant clusters (topics, ACLs, quotas, SCRAM credentials, consumer groups, log dirs).
 
 ## Why
 
@@ -30,13 +31,22 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.kafka.Produce`
 - `io.kestra.plugin.kafka.RealtimeTrigger`
 - `io.kestra.plugin.kafka.Trigger`
+- `io.kestra.plugin.kafka.admin.AbstractKafkaAdminTask` — shared AdminClient lifecycle/timeout base for all admin tasks
+- `io.kestra.plugin.kafka.admin.TopicCreate`, `TopicUpdate`, `TopicDelete`, `TopicList`, `TopicDescribe`, `TopicCreatePartitions`
+- `io.kestra.plugin.kafka.admin.AclCreate`, `AclDelete`, `AclList`
+- `io.kestra.plugin.kafka.admin.QuotaAlter`, `QuotaDescribe`
+- `io.kestra.plugin.kafka.admin.ScramCredentialCreate`, `ScramCredentialDelete`
+- `io.kestra.plugin.kafka.admin.ConsumerGroupList`, `ConsumerGroupDescribe`, `ConsumerGroupAlterOffsets`, `ConsumerGroupDelete`
+- `io.kestra.plugin.kafka.admin.DescribeLogDirs`
 
 ### Project Structure
 
 ```
 plugin-kafka/
 ├── src/main/java/io/kestra/plugin/kafka/serdes/
+├── src/main/java/io/kestra/plugin/kafka/admin/
 ├── src/test/java/io/kestra/plugin/kafka/serdes/
+├── src/test/java/io/kestra/plugin/kafka/admin/
 ├── build.gradle
 └── README.md
 ```

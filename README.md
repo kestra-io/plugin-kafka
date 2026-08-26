@@ -47,6 +47,7 @@
 
 - Provides plugin components under `io.kestra.plugin.kafka`.
 - Includes classes such as `QueueAcknowledgeType`, `Message`, `Consume`, `Produce`.
+- Provides control-plane (AdminClient) tasks under `io.kestra.plugin.kafka.admin` for provisioning multi-tenant clusters: topics (`TopicCreate`, `TopicUpdate`, `TopicDelete`, `TopicList`, `TopicDescribe`, `TopicCreatePartitions`), ACLs (`AclCreate`, `AclDelete`, `AclList`), quotas (`QuotaAlter`, `QuotaDescribe`), SCRAM credentials (`ScramCredentialCreate`, `ScramCredentialDelete`), consumer groups (`ConsumerGroupList`, `ConsumerGroupDescribe`, `ConsumerGroupAlterOffsets`, `ConsumerGroupDelete`), and log dirs (`DescribeLogDirs`).
 
 ## Documentation
 * Full documentation can be found under [kestra.io/docs](https://kestra.io/docs)

@@ -24,6 +24,12 @@ services:
       CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
       CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
       CONFLUENT_METRICS_ENABLE: 'false'
+      # Enable the KRaft-native authorizer so ACL admin tasks (AclCreate/AclDelete/AclList) have something to manage.
+      # ANONYMOUS is the principal on the PLAINTEXT listener; keep it a superuser and allow-by-default
+      # so every other (non-ACL) test keeps working without provisioning ACLs of its own.
+      KAFKA_AUTHORIZER_CLASS_NAME: 'org.apache.kafka.metadata.authorizer.StandardAuthorizer'
+      KAFKA_SUPER_USERS: 'User:ANONYMOUS'
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: 'true'
     ports:
       - "9092:9092"
     restart: on-failure

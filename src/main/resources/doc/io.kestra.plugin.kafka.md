@@ -15,3 +15,16 @@ Pass Schema Registry configuration (e.g., `schema.registry.url`) in the `serdePr
 ## Tasks
 
 Use `Produce` to publish messages to a topic and `Consume` to read a batch of records as a step within a running flow. For triggering flows from incoming messages, choose between `Trigger` and `RealtimeTrigger`: `Trigger` polls on a fixed interval and starts one execution per batch — use `maxRecords` or `maxDuration` to cap batch size; `RealtimeTrigger` starts one execution per record as it arrives with no batching. Use `Trigger` when you want predictable execution rate; use `RealtimeTrigger` when latency matters.
+
+## Admin tasks (`io.kestra.plugin.kafka.admin`)
+
+Control-plane tasks built on the Kafka AdminClient, typically used to provision and administer multi-tenant clusters (see [Kafka multi-tenancy](https://kafka.apache.org/documentation/#operations_multitenancy)). Like the data-plane tasks, every admin task takes connection settings through a `properties` map (`bootstrap.servers` required); an `AdminClient` is created and closed per task run. Every AdminClient call is bounded by a `timeout` property (defaults to `PT30S`) so a task never hangs the worker indefinitely.
+
+- **Topics**: `TopicCreate` (defaults to replication factor `1`, unsuitable for production; set `ifNotExists: true` for idempotent provisioning), `TopicUpdate` (alter `retention.ms`/`retention.bytes` and other configs), `TopicDelete`, `TopicList`, `TopicDescribe` (partitions layout and effective configs), `TopicCreatePartitions`.
+- **ACLs**: `AclCreate`, `AclDelete`, `AclList`. Use `patternType: PREFIXED` on `AclCreate` to authorize an entire per-tenant topic namespace (e.g. `tenant_acme_`) with a single ACL. `AclDelete`/`AclList` take the same filter fields, all optional — an unset filter field matches any value, so scope `resourceName`/`resourceType` carefully on `AclDelete`.
+- **Quotas**: `QuotaAlter` and `QuotaDescribe`, keyed by a `user`/`client-id`/`ip` entity combination, covering `producer_byte_rate`, `consumer_byte_rate`, `request_percentage` and `controller_mutation_rate`.
+- **SCRAM credentials**: `ScramCredentialCreate` (upserts a SASL/SCRAM user credential — `password` is a secret property) and `ScramCredentialDelete`.
+- **Consumer groups**: `ConsumerGroupList`, `ConsumerGroupDescribe` (includes per-partition committed offset, end offset and lag), `ConsumerGroupAlterOffsets`, `ConsumerGroupDelete`. Deleting or altering offsets of a group with active members fails with `GroupNotEmptyException` — stop its consumers first.
+- **Metering**: `DescribeLogDirs` reports per-partition on-disk size and replica lag per broker, plus a `topicSizes` summary useful for per-tenant storage metering.
+
+List/describe tasks return structured `Map`/`List` outputs (not files), since control-plane result sets are small enough to template directly, e.g. `{{ outputs.topic_describe.configs['retention.ms'] }}`. Delete and alter-offsets tasks are destructive and irreversible — there is no built-in approval step, so gate them with Kestra's own approval features if needed.
