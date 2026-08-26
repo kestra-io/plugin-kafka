@@ -24,7 +24,7 @@ import java.util.Map;
  */
 @SuperBuilder
 @ToString
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode
 @Getter
 @NoArgsConstructor
 public abstract class AbstractAclFilterTask extends AbstractKafkaAdminTask {

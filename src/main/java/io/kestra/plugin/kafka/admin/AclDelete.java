@@ -18,7 +18,7 @@ import java.util.Map;
 
 @SuperBuilder
 @ToString
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode
 @Getter
 @NoArgsConstructor
 @Schema(

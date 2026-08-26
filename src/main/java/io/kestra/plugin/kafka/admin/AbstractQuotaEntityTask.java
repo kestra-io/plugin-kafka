@@ -21,7 +21,7 @@ import java.util.Map;
  */
 @SuperBuilder
 @ToString
-@EqualsAndHashCode(callSuper = true)
+@EqualsAndHashCode
 @Getter
 @NoArgsConstructor
 public abstract class AbstractQuotaEntityTask extends AbstractKafkaAdminTask {
