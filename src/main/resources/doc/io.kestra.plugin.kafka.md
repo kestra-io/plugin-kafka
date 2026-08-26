@@ -16,7 +16,7 @@ Pass Schema Registry configuration (e.g., `schema.registry.url`) in the `serdePr
 
 Use `Produce` to publish messages to a topic and `Consume` to read a batch of records as a step within a running flow. For triggering flows from incoming messages, choose between `Trigger` and `RealtimeTrigger`: `Trigger` polls on a fixed interval and starts one execution per batch — use `maxRecords` or `maxDuration` to cap batch size; `RealtimeTrigger` starts one execution per record as it arrives with no batching. Use `Trigger` when you want predictable execution rate; use `RealtimeTrigger` when latency matters.
 
-## Admin tasks (`io.kestra.plugin.kafka.admin`)
+## Admin tasks
 
 Control-plane tasks built on the Kafka AdminClient, typically used to provision and administer multi-tenant clusters (see [Kafka multi-tenancy](https://kafka.apache.org/documentation/#operations_multitenancy)). Like the data-plane tasks, every admin task takes connection settings through a `properties` map (`bootstrap.servers` required); an `AdminClient` is created and closed per task run. Every AdminClient call is bounded by a `timeout` property (defaults to `PT30S`) so a task never hangs the worker indefinitely.
 

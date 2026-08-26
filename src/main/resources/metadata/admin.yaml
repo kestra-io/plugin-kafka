@@ -1,8 +1,0 @@
-group: io.kestra.plugin.kafka.admin
-name: "admin"
-title: "Apache Kafka Admin"
-description: "Control-plane tasks to provision and administer Apache Kafka clusters: topics, ACLs, quotas, SCRAM credentials, consumer groups, and log dirs."
-body: "Use these AdminClient-based tasks to provision multi-tenant Kafka clusters from a flow: create and configure topics, grant per-namespace ACLs (including PREFIXED patterns), set client quotas, manage SCRAM credentials, and inspect or clean up consumer groups and broker storage."
-videos: []
-createdBy: "Kestra Core Team"
-managedBy: "Kestra Core Team"
