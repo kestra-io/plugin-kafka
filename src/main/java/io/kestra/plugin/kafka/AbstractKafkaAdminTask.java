@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.common.KafkaFuture;
 
 import java.time.Duration;
@@ -46,7 +47,14 @@ public abstract class AbstractKafkaAdminTask extends Task {
     protected Property<Duration> timeout = Property.ofValue(Duration.ofSeconds(30));
 
     protected Properties createAdminProperties(RunContext runContext) throws Exception {
-        return KafkaClientProperties.create(this.properties, runContext);
+        var props = KafkaClientProperties.create(this.properties, runContext);
+        // AdminClient.close() with no argument drains under Kafka's default.api.timeout.ms (60s default), not our
+        // `timeout` property, so a task configured to fail fast still blocks on close(). Seed both so the client
+        // itself is bounded by `timeout` end to end; putIfAbsent so an explicit value in `properties` still wins.
+        var timeoutMillis = (int) renderTimeout(runContext).toMillis();
+        props.putIfAbsent(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, timeoutMillis);
+        props.putIfAbsent(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, timeoutMillis);
+        return props;
     }
 
     protected Duration renderTimeout(RunContext runContext) throws IllegalVariableEvaluationException {
@@ -86,7 +94,9 @@ public abstract class AbstractKafkaAdminTask extends Task {
             }
             throw e;
         } catch (TimeoutException e) {
-            throw new TimeoutException("AdminClient operation did not complete within " + timeout + " — increase the `timeout` property or check broker connectivity");
+            throw (TimeoutException) new TimeoutException(
+                "AdminClient operation did not complete within " + timeout + " — increase the `timeout` property or check broker connectivity"
+            ).initCause(e);
         }
     }
 }
