@@ -16,8 +16,11 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.errors.TopicExistsException;
+import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -112,20 +115,55 @@ public class TopicCreate extends AbstractKafkaAdminTask implements RunnableTask<
             newTopic.configs(rConfigs);
         }
 
+        boolean created = true;
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {
-            get(admin.createTopics(List.of(newTopic)).all(), timeout);
-        } catch (TopicExistsException e) {
-            if (!rIfNotExists) {
-                throw e;
+            try {
+                get(admin.createTopics(List.of(newTopic)).all(), timeout);
+            } catch (TopicExistsException e) {
+                if (!rIfNotExists) {
+                    throw e;
+                }
+                runContext.logger().info("Topic '{}' already exists, skipping creation as 'ifNotExists' is true", rTopic);
+                created = false;
             }
-            runContext.logger().info("Topic '{}' already exists, skipping creation as 'ifNotExists' is true", rTopic);
+
+            if (!created) {
+                // the existing topic may not match the requested shape (e.g. a previous run created it with a
+                // different partition count) — describe it so the output reflects what is actually on the cluster.
+                var description = describeExistingTopic(admin, rTopic, timeout);
+                rPartitions = description.partitions().size();
+                rReplicationFactor = description.partitions().isEmpty() ? 0 : description.partitions().getFirst().replicas().size();
+            }
         }
 
         return Output.builder()
             .topic(rTopic)
             .partitions(rPartitions)
             .replicationFactor(rReplicationFactor)
+            .created(created)
             .build();
+    }
+
+    /**
+     * On KRaft, {@code CreateTopics} validates against the controller's metadata, but the broker's own metadata
+     * cache used by {@code DescribeTopics} is populated asynchronously and can briefly lag right after creation.
+     * A {@link TopicExistsException} already confirms the topic exists, so a transient {@link UnknownTopicOrPartitionException}
+     * here is a propagation delay, not a real absence — retry briefly instead of surfacing it.
+     */
+    private static TopicDescription describeExistingTopic(AdminClient admin, String topic, Duration timeout) throws Exception {
+        UnknownTopicOrPartitionException lastError;
+        int attempts = 5;
+        int attempt = 0;
+        do {
+            try {
+                return get(admin.describeTopics(List.of(topic)).allTopicNames(), timeout).get(topic);
+            } catch (UnknownTopicOrPartitionException e) {
+                lastError = e;
+                Thread.sleep(100);
+            }
+        } while (++attempt < attempts);
+
+        throw lastError;
     }
 
     @Builder
@@ -139,5 +177,8 @@ public class TopicCreate extends AbstractKafkaAdminTask implements RunnableTask<
 
         @Schema(title = "Replication factor")
         private final Integer replicationFactor;
+
+        @Schema(title = "Whether the topic was created by this task run", description = "`false` when `ifNotExists` was `true` and the topic already existed — `partitions`/`replicationFactor` then reflect the existing topic, not the requested values.")
+        private final Boolean created;
     }
 }

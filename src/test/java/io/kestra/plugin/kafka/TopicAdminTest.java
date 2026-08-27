@@ -93,6 +93,8 @@ class TopicAdminTest {
         TopicDescribe describe = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
         TopicDescribe.Output describeOutput = describe.run(runContext);
         assertThat(describeOutput.getConfigs().get("retention.ms"), is("3600000"));
+
+        TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
     }
 
     @Test
@@ -107,7 +109,11 @@ class TopicAdminTest {
             .build();
         create.run(runContext);
 
-        assertThrows(TopicExistsException.class, () -> create.run(runContext));
+        try {
+            assertThrows(TopicExistsException.class, () -> create.run(runContext));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
     }
 
     @Test
@@ -121,10 +127,48 @@ class TopicAdminTest {
             .partitions(Property.ofValue(1))
             .ifNotExists(Property.ofValue(true))
             .build();
-        create.run(runContext);
+        TopicCreate.Output firstRun = create.run(runContext);
+        assertThat(firstRun.getCreated(), is(true));
 
-        TopicCreate.Output secondRun = create.run(runContext);
-        assertThat(secondRun.getTopic(), is(topic));
+        try {
+            TopicCreate.Output secondRun = create.run(runContext);
+            assertThat(secondRun.getTopic(), is(topic));
+            assertThat(secondRun.getCreated(), is(false));
+            assertThat(secondRun.getPartitions(), is(1));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
+    }
+
+    @Test
+    void shouldReportActualShapeWhenSkippingExistingTopicWithDifferentRequestedShape() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String topic = "tu_admin_" + IdUtils.create();
+
+        TopicCreate.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .partitions(Property.ofValue(1))
+            .replicationFactor(Property.ofValue(1))
+            .build()
+            .run(runContext);
+
+        try {
+            TopicCreate reCreate = TopicCreate.builder()
+                .properties(connection())
+                .topic(Property.ofValue(topic))
+                .partitions(Property.ofValue(9))
+                .replicationFactor(Property.ofValue(3))
+                .ifNotExists(Property.ofValue(true))
+                .build();
+            TopicCreate.Output output = reCreate.run(runContext);
+
+            assertThat(output.getCreated(), is(false));
+            assertThat(output.getPartitions(), is(1));
+            assertThat(output.getReplicationFactor(), is(1));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
     }
 
     @Test
@@ -163,9 +207,13 @@ class TopicAdminTest {
             .build()
             .run(runContext);
 
-        DescribeLogDirs describeLogDirs = DescribeLogDirs.builder().properties(connection()).build();
-        DescribeLogDirs.Output output = describeLogDirs.run(runContext);
+        try {
+            DescribeLogDirs describeLogDirs = DescribeLogDirs.builder().properties(connection()).build();
+            DescribeLogDirs.Output output = describeLogDirs.run(runContext);
 
-        assertThat(output.getLogDirs(), not(empty()));
+            assertThat(output.getLogDirs(), not(empty()));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
     }
 }
