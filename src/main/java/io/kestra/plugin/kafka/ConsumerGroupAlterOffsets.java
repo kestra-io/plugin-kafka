@@ -65,21 +65,21 @@ public class ConsumerGroupAlterOffsets extends AbstractKafkaAdminTask implements
     @PluginProperty(group = "main")
     private Property<String> groupId;
 
-    @Schema(title = "Offsets to set", description = "One entry per topic partition to overwrite.")
+    @Schema(
+        title = "Offsets to set",
+        description = "One entry per topic partition to overwrite. Can be a static list or a Pebble expression resolving to a list, for example the `offsets` output of `ConsumerGroupDescribe`."
+    )
     @NotNull
     @PluginProperty(group = "main")
-    private List<TopicPartitionOffset> offsets;
+    private Property<List<TopicPartitionOffset>> offsets;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rGroupId = requireRendered(runContext, this.groupId, String.class, "groupId");
-
-        if (this.offsets == null || this.offsets.isEmpty()) {
-            throw new IllegalArgumentException("Missing required property 'offsets'");
-        }
+        var rOffsetEntries = requireNonEmpty(runContext.render(this.offsets).asList(TopicPartitionOffset.class), "offsets");
 
         Map<TopicPartition, OffsetAndMetadata> rOffsets = new LinkedHashMap<>();
-        for (TopicPartitionOffset entry : this.offsets) {
+        for (TopicPartitionOffset entry : rOffsetEntries) {
             rOffsets.put(entry.toTopicPartition(runContext), entry.toOffsetAndMetadata(runContext));
         }
 
