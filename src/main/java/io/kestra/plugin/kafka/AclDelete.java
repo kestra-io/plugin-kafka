@@ -2,9 +2,12 @@ package io.kestra.plugin.kafka;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
+import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -12,6 +15,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.common.acl.AclBindingFilter;
 
 import java.util.List;
 import java.util.Map;
@@ -25,7 +29,7 @@ import java.util.Map;
     title = "Delete Kafka ACLs matching a filter",
     description = """
         Deletes every ACL matching the given filter using the Kafka AdminClient. This operation is destructive and cannot be undone.
-        Unset filter fields match any value, so an empty filter deletes every ACL on the cluster — scope `resourceName`/`resourceType` carefully.
+        Unset filter fields match any value, so a filter with nothing set would match every ACL on the cluster — this task refuses to run in that case unless `deleteAll` is set to `true`.
         """
 )
 @Plugin(
@@ -49,9 +53,28 @@ import java.util.Map;
 )
 public class AclDelete extends AbstractAclFilterTask implements RunnableTask<AclDelete.Output> {
 
+    @Schema(
+        title = "Confirm deleting every ACL on the cluster",
+        description = "Required opt-in when every filter field is unset (or renders empty), which would otherwise match — and delete — every ACL on the cluster. Defaults to `false`."
+    )
+    @NotNull
+    @Builder.Default
+    @PluginProperty(group = "reliability")
+    private Property<Boolean> deleteAll = Property.ofValue(false);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var filter = buildFilter(runContext);
+        var rDeleteAll = runContext.render(this.deleteAll).as(Boolean.class).orElse(false);
+
+        if (!rDeleteAll && filter.equals(AclBindingFilter.ANY)) {
+            throw new IllegalArgumentException(
+                "No filter field is set (or all render empty) — this would delete every ACL on the cluster. " +
+                    "Set at least one of 'resourceType', 'resourceName', 'patternType', 'principal', 'host', 'operation' or 'permissionType', " +
+                    "or set 'deleteAll' to true to confirm this is intentional"
+            );
+        }
+
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {

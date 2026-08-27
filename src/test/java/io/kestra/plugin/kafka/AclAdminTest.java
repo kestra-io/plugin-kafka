@@ -85,4 +85,46 @@ class AclAdminTest {
 
         assertThrows(IllegalArgumentException.class, () -> create.run(runContext));
     }
+
+    @Test
+    void shouldThrowWhenDeletingWithoutAnyFilterField() {
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        AclDelete delete = AclDelete.builder()
+            .properties(connection())
+            .build();
+
+        assertThrows(IllegalArgumentException.class, () -> delete.run(runContext));
+    }
+
+    @Test
+    void shouldDeleteAllAclsWhenOptedIn() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String resourceName = "tu_admin_acl_" + IdUtils.create();
+        String principal = "User:" + IdUtils.create();
+
+        AclCreate.builder()
+            .properties(connection())
+            .resourceType(Property.ofValue(ResourceType.TOPIC))
+            .resourceName(Property.ofValue(resourceName))
+            .patternType(Property.ofValue(PatternType.PREFIXED))
+            .principal(Property.ofValue(principal))
+            .host(Property.ofValue("*"))
+            .operation(Property.ofValue(AclOperation.WRITE))
+            .permissionType(Property.ofValue(AclPermissionType.ALLOW))
+            .build()
+            .run(runContext);
+
+        AclDelete delete = AclDelete.builder()
+            .properties(connection())
+            .deleteAll(Property.ofValue(true))
+            .build();
+        delete.run(runContext);
+
+        AclList afterDelete = AclList.builder()
+            .properties(connection())
+            .principal(Property.ofValue(principal))
+            .build();
+        assertThat(afterDelete.run(runContext).getAcls(), empty());
+    }
 }
