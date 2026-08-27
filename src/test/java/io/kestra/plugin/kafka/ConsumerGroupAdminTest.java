@@ -89,11 +89,11 @@ class ConsumerGroupAdminTest {
         ConsumerGroupAlterOffsets alterOffsets = ConsumerGroupAlterOffsets.builder()
             .properties(connection())
             .groupId(Property.ofValue(groupId))
-            .offsets(List.of(TopicPartitionOffset.builder()
+            .offsets(Property.ofValue(List.of(TopicPartitionOffset.builder()
                 .topic(Property.ofValue(topic))
                 .partition(Property.ofValue(0))
                 .offset(Property.ofValue(0L))
-                .build()))
+                .build())))
             .build();
         ConsumerGroupAlterOffsets.Output alterOutput = alterOffsets.run(runContext);
         assertThat(alterOutput.getGroupId(), is(groupId));
@@ -105,6 +105,25 @@ class ConsumerGroupAdminTest {
             .build();
         ConsumerGroupDelete.Output deleteOutput = delete.run(runContext);
         assertThat(deleteOutput.getDeletedGroups(), contains(groupId));
+    }
+
+    @Test
+    void shouldDedupeDuplicateGroupIdsOnDescribe() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String groupId = "tu_admin_group_" + IdUtils.create();
+        produceAndConsume(runContext, groupId);
+
+        try {
+            ConsumerGroupDescribe describe = ConsumerGroupDescribe.builder()
+                .properties(connection())
+                .groupIds(Property.ofValue(List.of(groupId, groupId)))
+                .build();
+            ConsumerGroupDescribe.Output describeOutput = describe.run(runContext);
+
+            assertThat(describeOutput.getGroups(), hasSize(1));
+        } finally {
+            ConsumerGroupDelete.builder().properties(connection()).groupIds(Property.ofValue(List.of(groupId))).build().run(runContext);
+        }
     }
 
     @Test

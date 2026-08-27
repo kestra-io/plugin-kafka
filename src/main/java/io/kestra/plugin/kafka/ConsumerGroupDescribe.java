@@ -68,7 +68,7 @@ public class ConsumerGroupDescribe extends AbstractKafkaAdminTask implements Run
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rGroupIds = requireNonEmpty(runContext.render(this.groupIds).asList(String.class), "groupIds");
+        var rGroupIds = requireNonEmpty(runContext.render(this.groupIds).asList(String.class), "groupIds").stream().distinct().toList();
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {
@@ -99,7 +99,7 @@ public class ConsumerGroupDescribe extends AbstractKafkaAdminTask implements Run
 
                     Map<String, Object> group = new LinkedHashMap<>();
                     group.put("groupId", groupId);
-                    group.put("state", description.state().toString());
+                    group.put("state", description.groupState().toString());
                     group.put("members", members);
                     group.put("offsets", offsets);
                     return group;
