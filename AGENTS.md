@@ -4,6 +4,7 @@
 
 - Provides plugin components under `io.kestra.plugin.kafka`.
 - Includes classes such as `QueueAcknowledgeType`, `Message`, `Consume`, `Produce`.
+- Provides control-plane (AdminClient) tasks for provisioning multi-tenant clusters (topics, ACLs, quotas, SCRAM credentials, consumer groups, log dirs).
 
 ## Why
 
@@ -30,6 +31,13 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.kafka.Produce`
 - `io.kestra.plugin.kafka.RealtimeTrigger`
 - `io.kestra.plugin.kafka.Trigger`
+- `io.kestra.plugin.kafka.AbstractKafkaAdminTask` — shared AdminClient lifecycle/timeout base for all admin tasks
+- `io.kestra.plugin.kafka.TopicCreate`, `TopicUpdate`, `TopicDelete`, `TopicList`, `TopicDescribe`, `TopicCreatePartitions`
+- `io.kestra.plugin.kafka.AclCreate`, `AclDelete`, `AclList`
+- `io.kestra.plugin.kafka.QuotaAlter`, `QuotaDescribe`
+- `io.kestra.plugin.kafka.ScramCredentialCreate`, `ScramCredentialDelete`
+- `io.kestra.plugin.kafka.ConsumerGroupList`, `ConsumerGroupDescribe`, `ConsumerGroupAlterOffsets`, `ConsumerGroupDelete`
+- `io.kestra.plugin.kafka.DescribeLogDirs`
 
 ### Project Structure
 
@@ -40,6 +48,8 @@ plugin-kafka/
 ├── build.gradle
 └── README.md
 ```
+
+Admin (control-plane) tasks live directly under `io.kestra.plugin.kafka` (root package), not a subpackage — the plugin's doc-lint tooling (`PKG-003`) forbids mixing root-level and subpackage tasks/triggers, and moving the existing data-plane tasks (`Produce`/`Consume`/`Trigger`/`RealtimeTrigger`) into a subpackage would be a breaking change for existing flows.
 
 ## References
 
