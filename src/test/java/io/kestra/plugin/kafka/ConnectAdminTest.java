@@ -316,7 +316,58 @@ class ConnectAdminTest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
+    void shouldCloneConnectorConfigIntoDifferentlyNamedConnector() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String originalName = "tu_connect_clone_src_" + IdUtils.create();
+        String cloneName = "tu_connect_clone_dst_" + IdUtils.create();
+        Path sourceFile = Path.of(dataDir, originalName + "_source.txt");
+        Files.writeString(sourceFile, "line1\n");
+
+        Map<String, String> config = Map.of(
+            "connector.class", "org.apache.kafka.connect.file.FileStreamSourceConnector",
+            "tasks.max", "1",
+            "file", "/data/" + sourceFile.getFileName(),
+            "topic", originalName + "_topic"
+        );
+
+        ConnectorCreate.builder()
+            .connectUrl(connectUrl())
+            .connectorName(Property.ofValue(originalName))
+            .config(Property.ofValue(config))
+            .build()
+            .run(runContext);
+
+        try {
+            waitForState(runContext, originalName, "RUNNING");
+
+            ConnectorGetConfig.Output configOutput = ConnectorGetConfig.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(originalName))
+                .build()
+                .run(runContext);
+
+            // Connect's GET .../config response embeds the original connector's own "name" in the config
+            // map — piping it straight into ConnectorCreate under a different connectorName must not 400.
+            ConnectorCreate.Output cloneOutput = ConnectorCreate.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(cloneName))
+                .config(configOutput.getConfig())
+                .build()
+                .run(runContext);
+
+            assertThat(cloneOutput.getConnectorName(), is(cloneName));
+            assertThat(cloneOutput.getConfig().get("name"), is(cloneName));
+            waitForState(runContext, cloneName, "RUNNING");
+        } finally {
+            ConnectorDelete.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(originalName)).build().run(runContext);
+            ConnectorDelete.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(cloneName)).build().run(runContext);
+            Files.deleteIfExists(sourceFile);
+        }
+    }
+
+    @Test
+    @Order(9)
     void shouldFailClearlyWhenWorkerUnreachable() {
         RunContext runContext = runContextFactory.of(Map.of());
 

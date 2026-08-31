@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -73,7 +74,10 @@ public class ConnectorUpdateConfig extends AbstractKafkaConnectTask implements R
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rConnectorName = requireRendered(runContext, this.connectorName, String.class, "connectorName");
-        var rConfig = runContext.render(this.config).asMap(String.class, String.class);
+        var rConfig = new HashMap<>(runContext.render(this.config).asMap(String.class, String.class));
+        // Same defensive overwrite as ConnectorCreate: keep the embedded "name" in sync with the
+        // URL's connector name in case a piped-through config (e.g. from ConnectorGetConfig) carries a stale one.
+        rConfig.put("name", rConnectorName);
 
         var request = requestBuilder(runContext, "PUT", "/connectors/" + encodePathSegment(rConnectorName) + "/config")
             .body(HttpRequest.JsonRequestBody.of(rConfig))

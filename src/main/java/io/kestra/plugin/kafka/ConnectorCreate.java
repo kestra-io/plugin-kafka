@@ -16,6 +16,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -73,7 +74,10 @@ public class ConnectorCreate extends AbstractKafkaConnectTask implements Runnabl
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rConnectorName = requireRendered(runContext, this.connectorName, String.class, "connectorName");
-        var rConfig = runContext.render(this.config).asMap(String.class, String.class);
+        var rConfig = new HashMap<>(runContext.render(this.config).asMap(String.class, String.class));
+        // Connect embeds "name" inside the config map of GET .../config responses; overwrite it so
+        // piping ConnectorGetConfig's output into a differently-named ConnectorCreate doesn't 400.
+        rConfig.put("name", rConnectorName);
 
         var body = Map.of("name", rConnectorName, "config", rConfig);
         var request = requestBuilder(runContext, "POST", "/connectors")
