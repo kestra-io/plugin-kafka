@@ -1,5 +1,7 @@
 package io.kestra.plugin.kafka;
 
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -55,6 +58,14 @@ class ConnectAdminTest {
     }
 
     private ConnectorGetStatus.Output waitForState(RunContext runContext, String connectorName, String targetState) throws Exception {
+        return waitForConnectorState(runContext, connectorName, targetState, true);
+    }
+
+    /**
+     * @param requireTasks whether the connector's tasks list must also be non-empty to consider the target
+     *                      state reached — false for {@code STOPPED}, where KIP-980 leaves the tasks list empty.
+     */
+    private ConnectorGetStatus.Output waitForConnectorState(RunContext runContext, String connectorName, String targetState, boolean requireTasks) throws Exception {
         var task = ConnectorGetStatus.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build();
 
         for (int attempt = 0; attempt < 30; attempt++) {
@@ -62,7 +73,7 @@ class ConnectAdminTest {
                 var output = task.run(runContext);
                 // right after create/pause/resume/restart, the status endpoint can briefly 404 or report the
                 // tasks list as still empty before the config change has fully propagated — keep polling
-                if (targetState.equalsIgnoreCase(output.getConnectorState()) && !output.getTasks().isEmpty()) {
+                if (targetState.equalsIgnoreCase(output.getConnectorState()) && (!requireTasks || !output.getTasks().isEmpty())) {
                     return output;
                 }
             } catch (KafkaConnectApiException e) {
@@ -74,6 +85,22 @@ class ConnectAdminTest {
         }
 
         throw new AssertionError("Connector '" + connectorName + "' did not reach state '" + targetState + "' in time");
+    }
+
+    /**
+     * Stops a connector via Kafka Connect's KIP-980 {@code PUT /connectors/{name}/stop} endpoint — required for
+     * {@code ConnectorAlterOffsets}/{@code ConnectorResetOffsets} to succeed, but not exposed by any task in this
+     * plugin yet, so it's called directly here using Kestra's internal HTTP client.
+     */
+    private void stopConnector(RunContext runContext, String connectorName) throws Exception {
+        var request = HttpRequest.builder()
+            .uri(URI.create(this.connectUrl + "/connectors/" + connectorName + "/stop"))
+            .method("PUT")
+            .build();
+
+        try (var client = HttpClient.builder().runContext(runContext).build()) {
+            client.request(request, String.class);
+        }
     }
 
     private String waitForFileContent(Path file, String expected) throws Exception {
@@ -313,6 +340,67 @@ class ConnectAdminTest {
         KafkaConnectApiException exception = assertThrows(KafkaConnectApiException.class, () -> task.run(runContext));
         assertThat(exception.getStatusCode(), is(404));
         assertThat(exception.getMessage(), containsString(connectorName));
+    }
+
+    @Test
+    @Order(7)
+    void connectorOffsetsLifecycleWhenStopped() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String connectorName = "tu_connect_offsets_" + IdUtils.create();
+        Path sourceFile = Path.of(dataDir, connectorName + "_source.txt");
+        Files.writeString(sourceFile, "line1\nline2\n");
+
+        Map<String, String> config = Map.of(
+            "connector.class", "org.apache.kafka.connect.file.FileStreamSourceConnector",
+            "tasks.max", "1",
+            "file", "/data/" + sourceFile.getFileName(),
+            "topic", connectorName + "_topic"
+        );
+
+        ConnectorCreate.builder()
+            .connectUrl(connectUrl())
+            .connectorName(Property.ofValue(connectorName))
+            .config(Property.ofValue(config))
+            .build()
+            .run(runContext);
+
+        try {
+            waitForState(runContext, connectorName, "RUNNING");
+
+            ConnectorGetOffsets.Output offsetsOutput = null;
+            for (int attempt = 0; attempt < 15 && (offsetsOutput == null || offsetsOutput.getOffsets().isEmpty()); attempt++) {
+                offsetsOutput = ConnectorGetOffsets.builder()
+                    .connectUrl(connectUrl())
+                    .connectorName(Property.ofValue(connectorName))
+                    .build()
+                    .run(runContext);
+                if (offsetsOutput.getOffsets().isEmpty()) {
+                    Thread.sleep(1000);
+                }
+            }
+            assertThat(offsetsOutput.getOffsets(), not(empty()));
+
+            stopConnector(runContext, connectorName);
+            waitForConnectorState(runContext, connectorName, "STOPPED", false);
+
+            ConnectorAlterOffsets.Output alterOutput = ConnectorAlterOffsets.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(connectorName))
+                .offsets(Property.ofValue(offsetsOutput.getOffsets()))
+                .build()
+                .run(runContext);
+            assertThat(alterOutput.getConnectorName(), is(connectorName));
+
+            ConnectorResetOffsets.Output resetOutput = ConnectorResetOffsets.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(connectorName))
+                .build()
+                .run(runContext);
+            assertThat(resetOutput.getConnectorName(), is(connectorName));
+        } finally {
+            ConnectorDelete.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build().run(runContext);
+            Files.deleteIfExists(sourceFile);
+        }
     }
 
     @Test

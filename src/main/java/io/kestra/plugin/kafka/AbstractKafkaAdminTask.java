@@ -61,13 +61,8 @@ public abstract class AbstractKafkaAdminTask extends Task {
         return runContext.render(this.timeout).as(Duration.class).orElse(Duration.ofSeconds(30));
     }
 
-    /**
-     * Renders a required property, failing with a message naming the missing field instead of an opaque
-     * {@code NoSuchElementException}.
-     */
     protected static <T> T requireRendered(RunContext runContext, Property<T> property, Class<T> type, String fieldName) throws IllegalVariableEvaluationException {
-        return runContext.render(property).as(type)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property '" + fieldName + "'"));
+        return KafkaTaskUtils.requireRendered(runContext, property, type, fieldName);
     }
 
     /**

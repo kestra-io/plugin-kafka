@@ -23,7 +23,9 @@ import lombok.experimental.SuperBuilder;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @SuperBuilder
@@ -51,13 +53,8 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
         return rConnectUrl.endsWith("/") ? rConnectUrl.substring(0, rConnectUrl.length() - 1) : rConnectUrl;
     }
 
-    /**
-     * Renders a required property, failing with a message naming the missing field instead of an opaque
-     * {@code NoSuchElementException}.
-     */
     protected static <T> T requireRendered(RunContext runContext, Property<T> property, Class<T> type, String fieldName) throws IllegalVariableEvaluationException {
-        return runContext.render(property).as(type)
-            .orElseThrow(() -> new IllegalArgumentException("Missing required property '" + fieldName + "'"));
+        return KafkaTaskUtils.requireRendered(runContext, property, type, fieldName);
     }
 
     protected static String encodePathSegment(String value) {
@@ -88,16 +85,17 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
                     "Connector '" + connectorName + "' was not found on the Kafka Connect worker at " + renderConnectUrl(runContext)
                         + " — check the connector name or that it hasn't already been deleted",
                     status,
-                    response.getBody()
+                    redactSecrets(response.getBody())
                 );
             }
 
             if (status >= 300) {
+                var redactedBody = redactSecrets(response.getBody());
                 throw new KafkaConnectApiException(
                     "Kafka Connect API call " + request.getMethod() + " " + request.getUri() + " failed with status " + status
-                        + (isBlank(response.getBody()) ? "" : ": " + response.getBody()),
+                        + (isBlank(redactedBody) ? "" : ": " + redactedBody),
                     status,
-                    response.getBody()
+                    redactedBody
                 );
             }
 
@@ -120,7 +118,13 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
 
         var rUsername = runContext.render(this.username).as(String.class);
         var rPassword = runContext.render(this.password).as(String.class);
-        if (rUsername.isPresent() && rPassword.isPresent()) {
+        if (rUsername.isPresent() != rPassword.isPresent()) {
+            throw new IllegalArgumentException(
+                "Both `username` and `password` must be set together for Kafka Connect basic auth — only '"
+                    + (rUsername.isPresent() ? "username" : "password") + "' was provided"
+            );
+        }
+        if (rUsername.isPresent()) {
             configurationBuilder.auth(BasicAuthConfiguration.builder()
                 .username(Property.ofValue(rUsername.get()))
                 .password(Property.ofValue(rPassword.get()))
@@ -154,7 +158,60 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
     }
 
     protected static <T> T parse(String body, Class<T> type) throws JsonProcessingException {
+        if (isBlank(body)) {
+            throw new IllegalStateException("Empty response from the Kafka Connect API — expected a " + type.getSimpleName() + " payload");
+        }
         return JacksonMapper.ofJson().readValue(body, type);
+    }
+
+    /**
+     * Redacts values of JSON keys that look like credentials before an error body is surfaced in a task log or
+     * exception message. Handles both flat maps (e.g. a submitted connector `config`) and Kafka Connect's nested
+     * config-validation shape, where the key name and its value live in separate {@code name}/{@code value} fields
+     * of the same object. Non-JSON bodies (e.g. a plain-text worker error) are returned unmodified — best effort,
+     * not a guarantee against every possible leak shape.
+     */
+    protected static String redactSecrets(String body) {
+        if (isBlank(body)) {
+            return body;
+        }
+        try {
+            var mapper = JacksonMapper.ofJson();
+            var redacted = redactSecretValues(mapper.readValue(body, Object.class));
+            return mapper.writeValueAsString(redacted);
+        } catch (JsonProcessingException e) {
+            return body;
+        }
+    }
+
+    // "key" is deliberately excluded from this list: Kafka Connect configs routinely use `key.converter`,
+    // `value.converter` and `internal.key.converter`, which are not secrets but would otherwise match on every
+    // FileStream/JDBC-style connector config, drowning out genuine redactions.
+    private static final List<String> SECRET_KEY_PATTERNS = List.of("password", "secret", "token", "credential", "apikey", "api_key", "accesskey", "access_key", "privatekey", "private_key");
+
+    private static boolean looksLikeSecretKey(String key) {
+        var lowerKey = key.toLowerCase(Locale.ROOT);
+        return SECRET_KEY_PATTERNS.stream().anyMatch(lowerKey::contains);
+    }
+
+    private static Object redactSecretValues(Object node) {
+        if (node instanceof Map<?, ?> map) {
+            var nameLooksSecret = map.get("name") instanceof String name && looksLikeSecretKey(name);
+            var result = new LinkedHashMap<String, Object>();
+            map.forEach((key, value) -> {
+                var stringKey = String.valueOf(key);
+                if (looksLikeSecretKey(stringKey) || (nameLooksSecret && "value".equals(stringKey))) {
+                    result.put(stringKey, "***REDACTED***");
+                } else {
+                    result.put(stringKey, redactSecretValues(value));
+                }
+            });
+            return result;
+        }
+        if (node instanceof List<?> list) {
+            return list.stream().map(AbstractKafkaConnectTask::redactSecretValues).toList();
+        }
+        return node;
     }
 
     /**
