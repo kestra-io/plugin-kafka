@@ -34,6 +34,37 @@ services:
       - "9092:9092"
     restart: on-failure
 
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:7.7.1
+    depends_on:
+      - kafka
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:29092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: 'kafka-connect'
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: 'plugin-kafka-connect-ci'
+      CONNECT_CONFIG_STORAGE_TOPIC: '_connect-configs'
+      CONNECT_OFFSET_STORAGE_TOPIC: '_connect-offsets'
+      CONNECT_STATUS_STORAGE_TOPIC: '_connect-status'
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      # commit offsets quickly so ConnectorGetOffsets/ConnectorAlterOffsets tests don't need to wait on the 60s default
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 1000
+      CONNECT_KEY_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_VALUE_CONVERTER: 'org.apache.kafka.connect.json.JsonConverter'
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: 'false'
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: 'false'
+      # cp-kafka-connect ships the FileStream connectors under this extra plugin dir, not on the default plugin path.
+      CONNECT_PLUGIN_PATH: '/usr/share/java,/usr/share/confluent-hub-components,/usr/share/filestream-connectors'
+      CONNECT_LOG4J_ROOT_LOGLEVEL: 'INFO'
+    ports:
+      - "8083:8083"
+    volumes:
+      # shared with the host so FileStream source/sink connector tests can read/write the same files as the test JVM
+      - ./build/connect-data:/data
+    restart: on-failure
+
   schema-registry:
     image: confluentinc/cp-schema-registry:8.1.1 # AK 4.1.x
     depends_on:

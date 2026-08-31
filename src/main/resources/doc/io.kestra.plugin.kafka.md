@@ -28,3 +28,17 @@ Control-plane tasks built on the Kafka AdminClient, typically used to provision 
 - **Metering**: `DescribeLogDirs` reports per-partition on-disk size and replica lag per broker, plus a `topicSizes` summary useful for per-tenant storage metering.
 
 List/describe tasks return structured `Map`/`List` outputs (not files), since control-plane result sets are small enough to template directly, e.g. `{{ outputs.topic_describe.configs['retention.ms'] }}`. Delete and alter-offsets tasks are destructive and irreversible — there is no built-in approval step, so gate them with Kestra's own approval features if needed.
+
+## Kafka Connect tasks
+
+Kafka Connect has no dedicated Java admin client — every task in this group calls the Connect [REST API](https://kafka.apache.org/documentation/#connect_rest) directly. Every task takes `connectUrl` (e.g. `http://connect:8083`), and optionally `username`/`password` for HTTP basic auth and `headers` for anything else (a reverse proxy, a bearer token). No `Authorization` header is sent when `username`/`password` are unset. Store credentials in [secrets](https://kestra.io/docs/concepts/secret).
+
+- **Lifecycle**: `ConnectorCreate`, `ConnectorUpdateConfig`, `ConnectorDelete`, `ConnectorPause`, `ConnectorResume`, `ConnectorRestart` (`includeTasks`/`onlyFailed`, both default `false`).
+- **Inspection**: `ConnectorGetStatus` returns typed `connectorState`/`tasks[*].state` fields usable directly in flow conditions. `ConnectorList` returns connector names, or name+status pairs with `expandStatus: true`. `ConnectorGetConfig` returns a `config` output shaped exactly like `ConnectorCreate`'s `config` input, so it pipes straight into `ConnectorCreate`/`ConnectorUpdateConfig` to clone or restore a connector.
+- **Offsets**: `ConnectorGetOffsets`, `ConnectorAlterOffsets`, `ConnectorResetOffsets`. Altering or resetting offsets requires the connector to be in the `STOPPED` state — a [KIP-980](https://cwiki.apache.org/confluence/display/KAFKA/KIP-980%3A+Allow+Connect+RestartRequest+to+Restart+Tasks+with+Exponential+Backoff) concept only available on Kafka 3.5+/Connect clusters; these two tasks don't pre-validate the connector's state, they surface Connect's error body verbatim if it isn't stopped. On older clusters, delete and recreate the connector instead.
+
+Every task fails with the Connect API's error body verbatim on a non-2xx response (e.g. 409 on `ConnectorCreate` for a name that already exists, 404 naming the connector on a lookup for a connector that doesn't exist).
+
+## Triggers
+
+`ConnectorStatusTrigger` polls a connector's status on a fixed interval (default `PT1M`) and fires an execution when the connector or any of its tasks matches `targetState` (case-insensitive), exposing the same typed fields as `ConnectorGetStatus`. A connector deleted mid-poll is treated as no match for that tick, not a trigger failure.
