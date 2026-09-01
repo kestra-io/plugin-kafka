@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.function.Predicate;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -29,6 +31,21 @@ class TopicAdminTest {
 
     private Property<Map<String, String>> connection() {
         return Property.ofValue(Map.of("bootstrap.servers", this.bootstrap));
+    }
+
+    /**
+     * AdminClient writes (create/alterConfigs) ack on the controller before the change is
+     * visible on every broker's metadata/config cache. Polls until the read reflects it,
+     * or the last read value once {@code timeoutMs} is exceeded.
+     */
+    private static <T> T awaitCondition(Callable<T> action, Predicate<T> condition, long timeoutMs) throws Exception {
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        T result = action.call();
+        while (!condition.test(result) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(500);
+            result = action.call();
+        }
+        return result;
     }
 
     @Test
@@ -49,7 +66,11 @@ class TopicAdminTest {
         assertThat(createOutput.getReplicationFactor(), is(1));
 
         TopicList list = TopicList.builder().properties(connection()).build();
-        TopicList.Output listOutput = list.run(runContext);
+        TopicList.Output listOutput = awaitCondition(
+            () -> list.run(runContext),
+            output -> output.getTopics().contains(topic),
+            10_000
+        );
         assertThat(listOutput.getTopics(), hasItem(topic));
 
         TopicDescribe describe = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
@@ -91,7 +112,11 @@ class TopicAdminTest {
         assertThat(updateOutput.getUpdatedConfigs().get("retention.ms"), is("3600000"));
 
         TopicDescribe describe = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
-        TopicDescribe.Output describeOutput = describe.run(runContext);
+        TopicDescribe.Output describeOutput = awaitCondition(
+            () -> describe.run(runContext),
+            output -> "3600000".equals(output.getConfigs().get("retention.ms")),
+            10_000
+        );
         assertThat(describeOutput.getConfigs().get("retention.ms"), is("3600000"));
 
         TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
