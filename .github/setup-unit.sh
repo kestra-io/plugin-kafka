@@ -8,6 +8,10 @@ bootstrap_server="localhost:9092"
 echo "[setup-unit] Resetting Kafka and Schema Registry containers..."
 docker compose -f "${compose_file}" down -v --remove-orphans >/dev/null 2>&1 || true
 
+# cp-kafka-connect runs as a non-root user; make sure it can write into the bind-mounted FileStream data dir.
+mkdir -p build/connect-data
+chmod 777 build/connect-data
+
 # Start Kafka and Schema Registry used by plugin unit/integration tests.
 echo "[setup-unit] Starting Kafka and Schema Registry containers..."
 docker compose -f "${compose_file}" up -d
@@ -26,6 +30,24 @@ for attempt in $(seq 1 30); do
     fi
 
     echo "[setup-unit] Kafka not ready yet (attempt ${attempt}/30), retrying in 2s..."
+    sleep 2
+done
+
+# Wait until the Kafka Connect worker's REST API is up before running Connect admin task tests.
+echo "[setup-unit] Waiting for Kafka Connect to become ready..."
+for attempt in $(seq 1 60); do
+    if curl -sf "http://localhost:8083/connectors" >/dev/null 2>&1; then
+        echo "[setup-unit] Kafka Connect is ready."
+        break
+    fi
+
+    if [ "${attempt}" -eq 60 ]; then
+        echo "[setup-unit] Kafka Connect did not become ready in time." >&2
+        docker compose -f "${compose_file}" logs --no-color --tail=80 kafka-connect >&2 || true
+        exit 1
+    fi
+
+    echo "[setup-unit] Kafka Connect not ready yet (attempt ${attempt}/60), retrying in 2s..."
     sleep 2
 done
 

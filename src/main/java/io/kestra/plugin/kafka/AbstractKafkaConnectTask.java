@@ -1,0 +1,295 @@
+package io.kestra.plugin.kafka;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.HttpResponse;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.client.HttpClientRequestException;
+import io.kestra.core.http.client.configurations.BasicAuthConfiguration;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.models.annotations.PluginProperty;
+import io.kestra.core.models.property.Property;
+import io.kestra.core.models.tasks.Task;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
+import jakarta.validation.constraints.NotNull;
+import lombok.*;
+import lombok.experimental.SuperBuilder;
+
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+@SuperBuilder
+@ToString
+@EqualsAndHashCode
+@Getter
+@NoArgsConstructor
+public abstract class AbstractKafkaConnectTask extends Task implements KafkaConnectConnectionInterface {
+    @NotNull
+    @PluginProperty(group = "connection")
+    protected Property<String> connectUrl;
+
+    @PluginProperty(group = "connection")
+    protected Property<String> username;
+
+    @ToString.Exclude
+    @PluginProperty(group = "connection", secret = true)
+    protected Property<String> password;
+
+    @PluginProperty(group = "connection")
+    protected Property<Map<String, String>> headers;
+
+    protected String renderConnectUrl(RunContext runContext) throws IllegalVariableEvaluationException {
+        var rConnectUrl = requireRendered(runContext, this.connectUrl, String.class, "connectUrl");
+        return rConnectUrl.endsWith("/") ? rConnectUrl.substring(0, rConnectUrl.length() - 1) : rConnectUrl;
+    }
+
+    protected static <T> T requireRendered(RunContext runContext, Property<T> property, Class<T> type, String fieldName) throws IllegalVariableEvaluationException {
+        return KafkaTaskUtils.requireRendered(runContext, property, type, fieldName);
+    }
+
+    protected static String encodePathSegment(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    protected HttpRequest.HttpRequestBuilder requestBuilder(RunContext runContext, String method, String path) throws IllegalVariableEvaluationException {
+        var uri = URI.create(renderConnectUrl(runContext) + path);
+        var builder = HttpRequest.builder().uri(uri).method(method);
+        var rHeaders = runContext.render(this.headers).asMap(String.class, String.class);
+        rHeaders.forEach(builder::addHeader);
+        return builder;
+    }
+
+    /**
+     * Executes a request against the Connect REST API and returns the raw response, mapping an unreachable
+     * worker or a non-2xx status to a {@link KafkaConnectApiException} carrying the API's error body verbatim.
+     * {@code connectorName} names the connector in a 404 message when the call is connector-scoped; pass
+     * {@code null} for connector-agnostic calls (e.g. {@code ConnectorCreate}, {@code ConnectorList}).
+     */
+    protected HttpResponse<String> execute(RunContext runContext, HttpRequest request, String connectorName) throws Exception {
+        return execute(runContext, request, connectorName, Map.of());
+    }
+
+    /**
+     * @param submittedConfig config values submitted with this request (if any). Secret-looking entries are
+     *                         string-replaced out of Connect's error body wherever they appear — including
+     *                         inside the free-text {@code message} field, not just under a secret-looking key.
+     */
+    protected HttpResponse<String> execute(RunContext runContext, HttpRequest request, String connectorName, Map<String, String> submittedConfig) throws Exception {
+        try (var client = buildClient(runContext)) {
+            var response = client.request(request, String.class);
+            var status = response.getStatus().getCode();
+
+            if (status == 404 && connectorName != null) {
+                throw new KafkaConnectApiException(
+                    "Connector '" + connectorName + "' was not found on the Kafka Connect worker at " + renderConnectUrl(runContext)
+                        + " — check the connector name or that it hasn't already been deleted",
+                    status,
+                    redactSecrets(response.getBody(), submittedConfig)
+                );
+            }
+
+            if (status >= 300) {
+                var redactedBody = redactSecrets(response.getBody(), submittedConfig);
+                throw new KafkaConnectApiException(
+                    "Kafka Connect API call " + request.getMethod() + " " + request.getUri() + " failed with status " + status
+                        + (isBlank(redactedBody) ? "" : ": " + redactedBody),
+                    status,
+                    redactedBody
+                );
+            }
+
+            return response;
+        } catch (KafkaConnectApiException | IllegalArgumentException e) {
+            throw e;
+        } catch (HttpClientRequestException | RuntimeException e) {
+            throw new KafkaConnectApiException(
+                "Unable to reach the Kafka Connect worker at " + renderConnectUrl(runContext)
+                    + " — check the `connectUrl` property and that the worker is reachable: " + e.getMessage(),
+                -1,
+                null,
+                e
+            );
+        }
+    }
+
+    private HttpClient buildClient(RunContext runContext) throws IllegalVariableEvaluationException {
+        var configurationBuilder = HttpConfiguration.builder()
+            // status codes are inspected manually in `execute` so the raw error body can be surfaced verbatim
+            .allowFailed(Property.ofValue(true));
+
+        var rUsername = runContext.render(this.username).as(String.class);
+        var rPassword = runContext.render(this.password).as(String.class);
+        if (rUsername.isPresent() != rPassword.isPresent()) {
+            throw new IllegalArgumentException(
+                "Both `username` and `password` must be set together for Kafka Connect basic auth — only '"
+                    + (rUsername.isPresent() ? "username" : "password") + "' was provided"
+            );
+        }
+        if (rUsername.isPresent()) {
+            configurationBuilder.auth(BasicAuthConfiguration.builder()
+                .username(Property.ofValue(rUsername.get()))
+                .password(Property.ofValue(rPassword.get()))
+                .build());
+        }
+
+        return HttpClient.builder().runContext(runContext).configuration(configurationBuilder.build()).build();
+    }
+
+    protected static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    protected static Map<String, String> parseStringMap(String body) throws JsonProcessingException {
+        return parseOrDefault(body, new TypeReference<Map<String, String>>() {}, Map.of());
+    }
+
+    protected static Map<String, Object> parseMap(String body) throws JsonProcessingException {
+        return parseOrDefault(body, new TypeReference<Map<String, Object>>() {}, Map.of());
+    }
+
+    protected static List<String> parseListOfStrings(String body) throws JsonProcessingException {
+        return parseOrDefault(body, new TypeReference<List<String>>() {}, List.of());
+    }
+
+    private static <T> T parseOrDefault(String body, TypeReference<T> typeReference, T emptyDefault) throws JsonProcessingException {
+        if (isBlank(body)) {
+            return emptyDefault;
+        }
+        return JacksonMapper.ofJson().readValue(body, typeReference);
+    }
+
+    protected static <T> T parse(String body, Class<T> type) throws JsonProcessingException {
+        if (isBlank(body)) {
+            throw new IllegalStateException("Empty response from the Kafka Connect API — expected a " + type.getSimpleName() + " payload");
+        }
+        return JacksonMapper.ofJson().readValue(body, type);
+    }
+
+    /**
+     * Redacts values of JSON keys that look like credentials before an error body is surfaced in a task log or
+     * exception message. Handles both flat maps (e.g. a submitted connector `config`) and Kafka Connect's nested
+     * config-validation shape, where the key name and its value live in separate {@code name}/{@code value} fields
+     * of the same object. Non-JSON bodies (e.g. a plain-text worker error) are returned unmodified — best effort,
+     * not a guarantee against every possible leak shape.
+     */
+    protected static String redactSecrets(String body) {
+        return redactSecrets(body, Map.of());
+    }
+
+    protected static String redactSecrets(String body, Map<String, String> submittedConfig) {
+        if (isBlank(body)) {
+            return body;
+        }
+        var scrubbed = redactSecretValuesInText(body, submittedConfig);
+        try {
+            var mapper = JacksonMapper.ofJson();
+            var redacted = redactSecretValues(mapper.readValue(scrubbed, Object.class));
+            return mapper.writeValueAsString(redacted);
+        } catch (JsonProcessingException e) {
+            return scrubbed;
+        }
+    }
+
+    /**
+     * Value-based redaction: string-replaces the raw values of secret-looking submitted config keys anywhere
+     * they appear in the body, including inside Connect's free-text {@code message} field — the key-based JSON
+     * redaction below can't catch those since the secret value isn't nested under its own key there.
+     */
+    private static String redactSecretValuesInText(String body, Map<String, String> submittedConfig) {
+        if (submittedConfig == null || submittedConfig.isEmpty()) {
+            return body;
+        }
+        var result = body;
+        for (var entry : submittedConfig.entrySet()) {
+            if (looksLikeSecretKey(entry.getKey()) && entry.getValue() != null && !entry.getValue().isBlank()) {
+                result = result.replace(entry.getValue(), "***REDACTED***");
+            }
+        }
+        return result;
+    }
+
+    // "key" is deliberately excluded from this list: Kafka Connect configs routinely use `key.converter`,
+    // `value.converter` and `internal.key.converter`, which are not secrets but would otherwise match on every
+    // FileStream/JDBC-style connector config, drowning out genuine redactions.
+    private static final List<String> SECRET_KEY_PATTERNS = List.of("password", "secret", "token", "credential", "apikey", "api_key", "accesskey", "access_key", "privatekey", "private_key");
+
+    private static boolean looksLikeSecretKey(String key) {
+        var lowerKey = key.toLowerCase(Locale.ROOT);
+        return SECRET_KEY_PATTERNS.stream().anyMatch(lowerKey::contains);
+    }
+
+    private static Object redactSecretValues(Object node) {
+        if (node instanceof Map<?, ?> map) {
+            var nameLooksSecret = map.get("name") instanceof String name && looksLikeSecretKey(name);
+            var result = new LinkedHashMap<String, Object>();
+            map.forEach((key, value) -> {
+                var stringKey = String.valueOf(key);
+                if (looksLikeSecretKey(stringKey) || (nameLooksSecret && "value".equals(stringKey))) {
+                    result.put(stringKey, "***REDACTED***");
+                } else {
+                    result.put(stringKey, redactSecretValues(value));
+                }
+            });
+            return result;
+        }
+        if (node instanceof List<?> list) {
+            return list.stream().map(AbstractKafkaConnectTask::redactSecretValues).toList();
+        }
+        return node;
+    }
+
+    /**
+     * Raw shape of a connector "info" response, returned by {@code POST /connectors} and {@code PUT /connectors/{name}/config}.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    protected static class ConnectorInfoResponse {
+        public String name;
+        public Map<String, String> config;
+        public List<ConnectorTaskReference> tasks;
+        public String type;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    protected static class ConnectorTaskReference {
+        public String connector;
+        public Integer task;
+    }
+
+    /**
+     * Raw shape of a connector "status" response, returned by {@code GET /connectors/{name}/status} and,
+     * nested under each connector name, by {@code GET /connectors?expand=status}.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    protected static class ConnectorStatusPayload {
+        public String name;
+        public ConnectorStateInfo connector;
+        public List<ConnectorTaskState> tasks;
+        public String type;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    protected static class ConnectorStateInfo {
+        public String state;
+        @JsonProperty("worker_id")
+        public String workerId;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    protected static class ConnectorTaskState {
+        public Integer id;
+        public String state;
+        @JsonProperty("worker_id")
+        public String workerId;
+        public String trace;
+    }
+}

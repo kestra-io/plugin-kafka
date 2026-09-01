@@ -48,6 +48,7 @@
 - Provides plugin components under `io.kestra.plugin.kafka`.
 - Includes classes such as `QueueAcknowledgeType`, `Message`, `Consume`, `Produce`.
 - Provides control-plane (AdminClient) tasks for provisioning multi-tenant clusters: topics (`TopicCreate`, `TopicUpdate`, `TopicDelete`, `TopicList`, `TopicDescribe`, `TopicCreatePartitions`), ACLs (`AclCreate`, `AclDelete`, `AclList`), quotas (`QuotaAlter`, `QuotaDescribe`), SCRAM credentials (`ScramCredentialCreate`, `ScramCredentialDelete`), consumer groups (`ConsumerGroupList`, `ConsumerGroupDescribe`, `ConsumerGroupAlterOffsets`, `ConsumerGroupDelete`), and log dirs (`DescribeLogDirs`).
+- Provides Kafka Connect REST API tasks for managing connectors (Kafka Connect has no Java admin client, so these are HTTP-based rather than AdminClient-based): `ConnectorCreate`, `ConnectorUpdateConfig`, `ConnectorGetStatus`, `ConnectorPause`, `ConnectorResume`, `ConnectorRestart`, `ConnectorDelete`, `ConnectorList`, `ConnectorGetConfig`, `ConnectorGetOffsets`, `ConnectorAlterOffsets`, `ConnectorResetOffsets`, and the `ConnectorStatusTrigger` trigger.
 
 ## Documentation
 * Full documentation can be found under [kestra.io/docs](https://kestra.io/docs)

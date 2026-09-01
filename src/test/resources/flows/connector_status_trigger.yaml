@@ -1,0 +1,15 @@
+id: connector_status_trigger
+namespace: io.kestra.tests
+
+triggers:
+  - id: watch
+    type: io.kestra.plugin.kafka.ConnectorStatusTrigger
+    interval: PT10S
+    connectUrl: http://localhost:8083
+    connectorName: tu_connect_trigger_source
+    targetState: RUNNING
+
+tasks:
+  - id: end
+    type: io.kestra.plugin.core.debug.Return
+    format: "{{task.id}} > {{taskrun.startDate}}"

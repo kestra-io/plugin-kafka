@@ -14,3 +14,7 @@ kestra:
 kafka:
   bootstrap: localhost:9092
   registry: http://localhost:8085
+  connect:
+    url: http://localhost:8083
+    # host-side path of the volume shared with the kafka-connect container's /data (see docker-compose-ci.yml)
+    data-dir: build/connect-data
