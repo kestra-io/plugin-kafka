@@ -84,7 +84,7 @@ public class ConnectorUpdateConfig extends AbstractKafkaConnectTask implements R
             .addHeader("Content-Type", "application/json")
             .build();
 
-        var response = execute(runContext, request, rConnectorName);
+        var response = execute(runContext, request, rConnectorName, rConfig);
         var info = parse(response.getBody(), ConnectorInfoResponse.class);
 
         return Output.builder()

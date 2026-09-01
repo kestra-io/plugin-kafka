@@ -24,6 +24,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -87,6 +88,18 @@ class ConnectAdminTest {
         throw new AssertionError("Connector '" + connectorName + "' did not reach state '" + targetState + "' in time");
     }
 
+    private void waitForConnectorAbsence(RunContext runContext, String connectorName) throws Exception {
+        for (int attempt = 0; attempt < 30; attempt++) {
+            var names = ConnectorList.builder().connectUrl(connectUrl()).build().run(runContext).getConnectorNames();
+            if (!names.contains(connectorName)) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
+
+        throw new AssertionError("Connector '" + connectorName + "' was not removed in time");
+    }
+
     /**
      * Stops a connector via Kafka Connect's KIP-980 {@code PUT /connectors/{name}/stop} endpoint — required for
      * {@code ConnectorAlterOffsets}/{@code ConnectorResetOffsets} to succeed, but not exposed by any task in this
@@ -124,7 +137,14 @@ class ConnectAdminTest {
 
         ConnectorList.Output output = ConnectorList.builder().connectUrl(connectUrl()).build().run(runContext);
 
-        assertThat(output.getConnectorNames(), is(empty()));
+        // the Connect worker is shared with ConnectorStatusTriggerTest, which creates its own "tu_connect_trigger_source"
+        // fixture in a @BeforeEach — JUnit doesn't guarantee this class runs before/after that one, so only assert
+        // that none of THIS suite's own connectors exist yet, not that the whole worker is empty.
+        var foreignFixtures = Set.of("tu_connect_trigger_source");
+        assertThat(
+            output.getConnectorNames().stream().filter(name -> !foreignFixtures.contains(name)).toList(),
+            is(empty())
+        );
         assertThat(output.getConnectors(), is(empty()));
     }
 
@@ -181,7 +201,7 @@ class ConnectAdminTest {
                 .connectorName(Property.ofValue(connectorName))
                 .build()
                 .run(runContext);
-            Map<String, String> rConfig = runContext.render(configOutput.getConfig()).asMap(String.class, String.class);
+            Map<String, String> rConfig = configOutput.getConfig();
             assertThat(rConfig.get("topic"), is(topic));
 
             var updatedConfig = new HashMap<>(rConfig);
@@ -233,8 +253,7 @@ class ConnectAdminTest {
             Files.deleteIfExists(sourceFile);
         }
 
-        ConnectorList.Output afterDelete = ConnectorList.builder().connectUrl(connectUrl()).build().run(runContext);
-        assertThat(afterDelete.getConnectorNames(), not(hasItem(connectorName)));
+        waitForConnectorAbsence(runContext, connectorName);
     }
 
     @Test
@@ -440,7 +459,7 @@ class ConnectAdminTest {
             ConnectorCreate.Output cloneOutput = ConnectorCreate.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(cloneName))
-                .config(configOutput.getConfig())
+                .config(Property.ofValue(configOutput.getConfig()))
                 .build()
                 .run(runContext);
 
@@ -460,6 +479,18 @@ class ConnectAdminTest {
         RunContext runContext = runContextFactory.of(Map.of());
 
         ConnectorList task = ConnectorList.builder().connectUrl(Property.ofValue("http://localhost:1")).build();
+
+        KafkaConnectApiException exception = assertThrows(KafkaConnectApiException.class, () -> task.run(runContext));
+        assertThat(exception.getStatusCode(), is(-1));
+        assertThat(exception.getMessage(), containsString("Unable to reach the Kafka Connect worker"));
+    }
+
+    @Test
+    @Order(10)
+    void shouldFailClearlyWhenHostnameIsUnresolvable() {
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        ConnectorList task = ConnectorList.builder().connectUrl(Property.ofValue("http://kafka-connect-does-not-exist-abc123.invalid:8083")).build();
 
         KafkaConnectApiException exception = assertThrows(KafkaConnectApiException.class, () -> task.run(runContext));
         assertThat(exception.getStatusCode(), is(-1));

@@ -85,7 +85,7 @@ public class ConnectorCreate extends AbstractKafkaConnectTask implements Runnabl
             .addHeader("Content-Type", "application/json")
             .build();
 
-        var response = execute(runContext, request, null);
+        var response = execute(runContext, request, null, rConfig);
         var info = parse(response.getBody(), ConnectorInfoResponse.class);
 
         return Output.builder()

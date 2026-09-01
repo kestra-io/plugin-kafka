@@ -25,7 +25,7 @@ import lombok.experimental.SuperBuilder;
     description = """
         Deletes all of the connector's committed offsets, so it restarts from the beginning (source) or from the consumer group's default reset policy (sink) next time it runs.
 
-        The connector **must be in the `STOPPED` state** for this call to succeed; this is a [KIP-980](https://cwiki.apache.org/confluence/display/KAFKA/KIP-980%3A+Allow+Connect+RestartRequest+to+Restart+Tasks+with+Exponential+Backoff) concept only available on Kafka Connect clusters running Kafka 3.5+ (`STOPPED` did not exist before that). This task does **not** pre-validate the connector's state client-side — it always sends the request and surfaces Connect's error body verbatim (HTTP 400) if the connector isn't `STOPPED`. On older clusters that don't support `STOPPED`, delete and recreate the connector instead.
+        The connector **must be in the `STOPPED` state** for this call to succeed; resetting offsets via `DELETE /connectors/{name}/offsets` is a [KIP-875](https://cwiki.apache.org/confluence/display/KAFKA/KIP-875:+First-class+offsets+support+in+Kafka+Connect) concept only available on Kafka Connect clusters running Kafka 3.6+. This task does **not** pre-validate the connector's state client-side — it always sends the request and surfaces Connect's error body verbatim (HTTP 400) if the connector isn't `STOPPED`. On older clusters that don't support this, delete and recreate the connector instead.
         """
 )
 @Plugin(

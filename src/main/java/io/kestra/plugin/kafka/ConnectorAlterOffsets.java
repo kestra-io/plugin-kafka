@@ -29,7 +29,7 @@ import java.util.Map;
     description = """
         Overwrites the connector's offsets with the given `offsets` value — typically obtained from `ConnectorGetOffsets` and edited, or built from scratch to skip/replay records.
 
-        The connector **must be in the `STOPPED` state** for this call to succeed; this is a [KIP-980](https://cwiki.apache.org/confluence/display/KAFKA/KIP-980%3A+Allow+Connect+RestartRequest+to+Restart+Tasks+with+Exponential+Backoff) concept only available on Kafka Connect clusters running Kafka 3.5+ (`STOPPED` did not exist before that). This task does **not** pre-validate the connector's state client-side — it always sends the request and surfaces Connect's error body verbatim (HTTP 400) if the connector isn't `STOPPED`. Stop the connector first, e.g. with `ConnectorUpdateConfig` toggling to a stopped state or the Connect `PUT /connectors/{name}/stop` endpoint. On older clusters that don't support `STOPPED`, delete and recreate the connector instead.
+        The connector **must be in the `STOPPED` state** for this call to succeed; altering offsets via `PATCH /connectors/{name}/offsets` is a [KIP-875](https://cwiki.apache.org/confluence/display/KAFKA/KIP-875:+First-class+offsets+support+in+Kafka+Connect) concept only available on Kafka Connect clusters running Kafka 3.6+. This task does **not** pre-validate the connector's state client-side — it always sends the request and surfaces Connect's error body verbatim (HTTP 400) if the connector isn't `STOPPED`. Stop the connector first, e.g. with `ConnectorUpdateConfig` toggling to a stopped state or the Connect `PUT /connectors/{name}/stop` endpoint. On older clusters that don't support this, delete and recreate the connector instead.
         """
 )
 @Plugin(

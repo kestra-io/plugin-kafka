@@ -66,7 +66,7 @@ public class ConnectorGetConfig extends AbstractKafkaConnectTask implements Runn
 
         return Output.builder()
             .connectorName(rConnectorName)
-            .config(Property.ofValue(parseStringMap(response.getBody())))
+            .config(parseStringMap(response.getBody()))
             .build();
     }
 
@@ -80,6 +80,6 @@ public class ConnectorGetConfig extends AbstractKafkaConnectTask implements Runn
             title = "Connector configuration",
             description = "Same shape as `ConnectorCreate`'s `config` input — pass directly to `ConnectorCreate.config` or `ConnectorUpdateConfig.config`."
         )
-        private final Property<Map<String, String>> config;
+        private final Map<String, String> config;
     }
 }

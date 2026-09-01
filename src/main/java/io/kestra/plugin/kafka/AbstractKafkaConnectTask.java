@@ -76,6 +76,15 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
      * {@code null} for connector-agnostic calls (e.g. {@code ConnectorCreate}, {@code ConnectorList}).
      */
     protected HttpResponse<String> execute(RunContext runContext, HttpRequest request, String connectorName) throws Exception {
+        return execute(runContext, request, connectorName, Map.of());
+    }
+
+    /**
+     * @param submittedConfig config values submitted with this request (if any). Secret-looking entries are
+     *                         string-replaced out of Connect's error body wherever they appear — including
+     *                         inside the free-text {@code message} field, not just under a secret-looking key.
+     */
+    protected HttpResponse<String> execute(RunContext runContext, HttpRequest request, String connectorName, Map<String, String> submittedConfig) throws Exception {
         try (var client = buildClient(runContext)) {
             var response = client.request(request, String.class);
             var status = response.getStatus().getCode();
@@ -85,12 +94,12 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
                     "Connector '" + connectorName + "' was not found on the Kafka Connect worker at " + renderConnectUrl(runContext)
                         + " — check the connector name or that it hasn't already been deleted",
                     status,
-                    redactSecrets(response.getBody())
+                    redactSecrets(response.getBody(), submittedConfig)
                 );
             }
 
             if (status >= 300) {
-                var redactedBody = redactSecrets(response.getBody());
+                var redactedBody = redactSecrets(response.getBody(), submittedConfig);
                 throw new KafkaConnectApiException(
                     "Kafka Connect API call " + request.getMethod() + " " + request.getUri() + " failed with status " + status
                         + (isBlank(redactedBody) ? "" : ": " + redactedBody),
@@ -100,7 +109,9 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
             }
 
             return response;
-        } catch (HttpClientRequestException e) {
+        } catch (KafkaConnectApiException | IllegalArgumentException e) {
+            throw e;
+        } catch (HttpClientRequestException | RuntimeException e) {
             throw new KafkaConnectApiException(
                 "Unable to reach the Kafka Connect worker at " + renderConnectUrl(runContext)
                     + " — check the `connectUrl` property and that the worker is reachable: " + e.getMessage(),
@@ -172,16 +183,39 @@ public abstract class AbstractKafkaConnectTask extends Task implements KafkaConn
      * not a guarantee against every possible leak shape.
      */
     protected static String redactSecrets(String body) {
+        return redactSecrets(body, Map.of());
+    }
+
+    protected static String redactSecrets(String body, Map<String, String> submittedConfig) {
         if (isBlank(body)) {
             return body;
         }
+        var scrubbed = redactSecretValuesInText(body, submittedConfig);
         try {
             var mapper = JacksonMapper.ofJson();
-            var redacted = redactSecretValues(mapper.readValue(body, Object.class));
+            var redacted = redactSecretValues(mapper.readValue(scrubbed, Object.class));
             return mapper.writeValueAsString(redacted);
         } catch (JsonProcessingException e) {
+            return scrubbed;
+        }
+    }
+
+    /**
+     * Value-based redaction: string-replaces the raw values of secret-looking submitted config keys anywhere
+     * they appear in the body, including inside Connect's free-text {@code message} field — the key-based JSON
+     * redaction below can't catch those since the secret value isn't nested under its own key there.
+     */
+    private static String redactSecretValuesInText(String body, Map<String, String> submittedConfig) {
+        if (submittedConfig == null || submittedConfig.isEmpty()) {
             return body;
         }
+        var result = body;
+        for (var entry : submittedConfig.entrySet()) {
+            if (looksLikeSecretKey(entry.getKey()) && entry.getValue() != null && !entry.getValue().isBlank()) {
+                result = result.replace(entry.getValue(), "***REDACTED***");
+            }
+        }
+        return result;
     }
 
     // "key" is deliberately excluded from this list: Kafka Connect configs routinely use `key.converter`,
