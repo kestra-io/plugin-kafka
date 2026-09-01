@@ -34,8 +34,27 @@ tasks:
     wait: false
 
   - id: wait_kafka
-    type: io.kestra.plugin.core.flow.Sleep
-    duration: PT20S
+    type: io.kestra.plugin.kafka.TopicList
+    properties:
+      bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
+    timeout: PT5S
+    retry:
+      type: constant
+      interval: PT2S
+      maxDuration: PT1M
+      warningOnRetry: true
+
+  - id: topic_create
+    type: io.kestra.plugin.kafka.TopicCreate
+    properties:
+      bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
+    topic: "sanity.classic.{{ execution.id }}"
+    partitions: 1
+    retry:
+      type: constant
+      interval: PT2S
+      maxDuration: PT30S
+      warningOnRetry: true
 
   - id: produce_classic
     type: io.kestra.plugin.kafka.Produce
@@ -61,10 +80,6 @@ tasks:
         headers:
           match: "yes"
           sequence: "3"
-
-  - id: wait_classic_messages
-    type: io.kestra.plugin.core.flow.Sleep
-    duration: PT5S
 
   - id: consume_all
     type: io.kestra.plugin.kafka.Consume
