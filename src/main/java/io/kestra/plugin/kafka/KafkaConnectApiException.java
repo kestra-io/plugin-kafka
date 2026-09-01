@@ -4,7 +4,7 @@ import lombok.Getter;
 
 /**
  * Raised for any Kafka Connect REST API call that could not be completed as requested: an unreachable worker,
- * a non-2xx response, or an empty response body where one was expected. {@link #getStatusCode()} is {@code -1}
+ * a non-2xx response, or an empty response body where one was expected. {@link #statusCode} is {@code -1}
  * when the worker itself could not be reached (no HTTP response was received).
  */
 @Getter
