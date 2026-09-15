@@ -153,6 +153,17 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     @PluginProperty(group = "advanced")
     private Property<Map<String, String>> headerFilters;
 
+    @Schema(
+    title = "Deduplicate records",
+    description = """
+        When enabled, duplicate records retrieved during the same execution are filtered out
+        using the Kafka topic, partition, and offset.
+        """
+    )
+    @Builder.Default
+    @PluginProperty(group = "processing")
+    private Property<Boolean> deduplicate = Property.ofValue(false);
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -173,6 +184,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
             .maxRecords(this.maxRecords)
             .maxDuration(this.maxDuration)
             .headerFilters(this.headerFilters)
+            .deduplicate(this.deduplicate)
             .build();
     }
 

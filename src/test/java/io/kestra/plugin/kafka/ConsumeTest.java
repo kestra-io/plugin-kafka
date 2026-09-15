@@ -8,6 +8,8 @@ import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.PartitionInfo;
@@ -20,7 +22,9 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -209,6 +213,58 @@ class ConsumeTest {
         );
 
         Assertions.assertTrue(task.matchHeaders(headers, filters));
+    }
+
+    @Test
+    void shouldDeduplicateRecordsByTopicPartitionAndOffset() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder().build();
+        TopicPartition topicPartition = new TopicPartition("topic", 0);
+        ConsumerRecords<Object, Object> records = new ConsumerRecords<>(Map.of(
+            topicPartition,
+            List.of(
+                new ConsumerRecord<>("topic", 0, 10L, "key-10", "value-10"),
+                new ConsumerRecord<>("topic", 0, 10L, "key-10-duplicate", "value-10-duplicate"),
+                new ConsumerRecord<>("topic", 0, 11L, "key-11", "value-11")
+            )
+        ));
+        List<ConsumerRecord<Object, Object>> matchedRecords = new ArrayList<>();
+
+        int matchedCount = task.processConsumerRecords(
+            runContext,
+            records,
+            true,
+            new HashMap<>(),
+            matchedRecords::add
+        );
+
+        Assertions.assertEquals(2, matchedCount);
+        Assertions.assertEquals(List.of(10L, 11L), matchedRecords.stream().map(ConsumerRecord::offset).toList());
+    }
+
+    @Test
+    void shouldKeepSameOffsetFromDifferentPartitionsWhenDeduplicating() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder().build();
+        ConsumerRecords<Object, Object> records = new ConsumerRecords<>(Map.of(
+            new TopicPartition("topic", 0), List.of(new ConsumerRecord<>("topic", 0, 10L, "key-0", "value-0")),
+            new TopicPartition("topic", 1), List.of(new ConsumerRecord<>("topic", 1, 10L, "key-1", "value-1"))
+        ));
+        List<ConsumerRecord<Object, Object>> matchedRecords = new ArrayList<>();
+
+        int matchedCount = task.processConsumerRecords(
+            runContext,
+            records,
+            true,
+            new HashMap<>(),
+            matchedRecords::add
+        );
+
+        Assertions.assertEquals(2, matchedCount);
+        assertThat(
+            matchedRecords.stream().map(ConsumerRecord::partition).toList(),
+            Matchers.containsInAnyOrder(0, 1)
+        );
     }
 
     @Test
