@@ -158,6 +158,26 @@ import java.util.stream.StreamSupport;
         ),
         @Example(
             full = true,
+            title = "Consume records with deduplication enabled",
+            code = """
+                id: consume_deduplicated
+                namespace: company.team
+
+                tasks:
+                  - id: consume
+                    type: io.kestra.plugin.kafka.Consume
+                    topic: orders
+                    groupId: orders-consumer
+                    properties:
+                        bootstrap.servers: localhost:9092
+                        auto.offset.reset: earliest
+                    keyDeserializer: STRING
+                    valueDeserializer: JSON
+                    deduplicate: true
+                """
+        ),
+        @Example(
+            full = true,
             title = "Consume queue-style with Kafka share groups",
             code = """
                 id: consume_kafka_share_group
@@ -251,6 +271,17 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
+
+    @Schema(
+    title = "Deduplicate records",
+    description = """
+        When enabled, duplicate records retrieved during the same execution are filtered out
+        using the Kafka topic, partition, and offset.
+        """
+    )
+    @Builder.Default
+    @PluginProperty(group = "processing")
+    private Property<Boolean> deduplicate = Property.ofValue(false);
 
     @Getter(AccessLevel.PACKAGE)
     private ConsumerSubscription subscription;
@@ -371,14 +402,16 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
             var count = new HashMap<String, Integer>();
             var total = new AtomicInteger();
+            var lastOffsets = new HashMap<TopicPartition, Long>();
             var started = ZonedDateTime.now();
             ConsumerRecords<Object, Object> records;
             boolean empty;
+            var deduplicate = runContext.render(this.deduplicate).as(Boolean.class).orElse(false);
 
             do {
                 records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
                 empty = records.isEmpty();
-                total.addAndGet(processConsumerRecords(runContext, records, consumerRecord -> {
+                total.addAndGet(processConsumerRecords(runContext, records, deduplicate, lastOffsets, consumerRecord -> {
                     FileSerde.write(output, this.recordToMessage(consumerRecord));
                     count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
                 }));
@@ -416,6 +449,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             var started = ZonedDateTime.now();
             ConsumerRecords<Object, Object> records;
             boolean empty;
+            if (runContext.render(this.deduplicate).as(Boolean.class).orElse(false)) {
+                 runContext.logger().warn("Deduplication is not supported for SHARE consumer mode");
+            }
 
             do {
                 records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
@@ -475,6 +511,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     int processConsumerRecords(RunContext runContext,
                                ConsumerRecords<Object, Object> records,
+                               boolean deduplicate,
+                                Map<TopicPartition, Long> lastOffsets,
                                RecordHandler onMatchingRecord) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
         var matchedCount = 0;
@@ -482,6 +520,20 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         for (var consumerRecord : records) {
             if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)) {
                 continue;
+            }
+            if (deduplicate) {
+                var topicPartition = new TopicPartition(
+                    consumerRecord.topic(),
+                    consumerRecord.partition()
+                );
+
+                var lastOffset = lastOffsets.get(topicPartition);
+
+                if (lastOffset != null && consumerRecord.offset() <= lastOffset) {
+                    continue;
+                }
+
+                lastOffsets.put(topicPartition, consumerRecord.offset());
             }
 
             onMatchingRecord.accept(consumerRecord);

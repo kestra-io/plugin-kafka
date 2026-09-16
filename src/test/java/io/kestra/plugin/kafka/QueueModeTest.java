@@ -67,12 +67,14 @@ class QueueModeTest {
             .groupId(Property.ofValue("orders-share-group"))
             .groupType(Property.ofValue(GroupType.SHARE))
             .acknowledgeType(Property.ofValue(QueueAcknowledgeType.RELEASE))
+            .deduplicate(Property.ofValue(true))
             .build();
 
         var consumeTask = trigger.consumeTask();
 
         assertThat(runContext.render(consumeTask.getGroupType()).as(GroupType.class).orElseThrow(), is(GroupType.SHARE));
         assertThat(runContext.render(consumeTask.getAcknowledgeType()).as(QueueAcknowledgeType.class).orElseThrow(), is(QueueAcknowledgeType.RELEASE));
+        assertThat(runContext.render(consumeTask.getDeduplicate()).as(Boolean.class).orElseThrow(), is(true));
     }
 
     @Test
@@ -86,11 +88,13 @@ class QueueModeTest {
             .groupId(Property.ofValue("orders-share-group"))
             .groupType(Property.ofValue(GroupType.SHARE))
             .acknowledgeType(Property.ofValue(QueueAcknowledgeType.REJECT))
+            .deduplicate(Property.ofValue(true))
             .build();
 
         var consumeTask = trigger.consumeTask();
 
         assertThat(runContext.render(consumeTask.getGroupType()).as(GroupType.class).orElseThrow(), is(GroupType.SHARE));
         assertThat(runContext.render(consumeTask.getAcknowledgeType()).as(QueueAcknowledgeType.class).orElseThrow(), is(QueueAcknowledgeType.REJECT));
+        assertThat(runContext.render(consumeTask.getDeduplicate()).as(Boolean.class).orElseThrow(), is(true));
     }
 }

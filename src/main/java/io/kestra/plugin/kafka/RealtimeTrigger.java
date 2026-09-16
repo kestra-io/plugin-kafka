@@ -222,6 +222,17 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @PluginProperty(group = "advanced")
     private Property<Map<String, String>> headerFilters;
 
+    @Schema(
+    title = "Deduplicate records",
+    description = """
+        When enabled, duplicate records retrieved during the same execution are filtered out
+        using the Kafka topic, partition, and offset.
+        """
+    )
+    @Builder.Default
+    @PluginProperty(group = "processing")
+    private Property<Boolean> deduplicate = Property.ofValue(false);
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -240,6 +251,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             .onSerdeError(this.onSerdeError)
             .since(this.since)
             .headerFilters(this.headerFilters)
+            .deduplicate(this.deduplicate)
             .build();
     }
 
@@ -322,9 +334,11 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 this.partitions
             );
 
+            boolean deduplicate = runContext.render(task.getDeduplicate()).as(Boolean.class).orElse(false);
+            Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);
-                task.processConsumerRecords(runContext, records, fluxSink::next);
+                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next);
                 consumer.commitSync();
             });
         }
