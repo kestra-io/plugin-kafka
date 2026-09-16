@@ -156,26 +156,26 @@ import java.util.stream.StreamSupport;
                       region: us-east
                 """
         ),
-                @Example(
-                        full = true,
-                        title = "Consume records with deduplication enabled",
-                        code = """
-                                id: consume_deduplicated
-                                namespace: company.team
+        @Example(
+            full = true,
+            title = "Consume records with deduplication enabled",
+            code = """
+                id: consume_deduplicated
+                namespace: company.team
 
-                                tasks:
-                                    - id: consume
-                                        type: io.kestra.plugin.kafka.Consume
-                                        topic: orders
-                                        groupId: orders-consumer
-                                        properties:
-                                            bootstrap.servers: localhost:9092
-                                            auto.offset.reset: earliest
-                                        keyDeserializer: STRING
-                                        valueDeserializer: JSON
-                                        deduplicate: true
-                                """
-                ),
+                tasks:
+                  - id: consume
+                    type: io.kestra.plugin.kafka.Consume
+                    topic: orders
+                    groupId: orders-consumer
+                    properties:
+                        bootstrap.servers: localhost:9092
+                        auto.offset.reset: earliest
+                    keyDeserializer: STRING
+                    valueDeserializer: JSON
+                    deduplicate: true
+                """
+        ),
         @Example(
             full = true,
             title = "Consume queue-style with Kafka share groups",
@@ -449,6 +449,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             var started = ZonedDateTime.now();
             ConsumerRecords<Object, Object> records;
             boolean empty;
+            if (runContext.render(this.deduplicate).as(Boolean.class).orElse(false)) {
+                 runContext.logger().warn("Deduplication is not supported for SHARE consumer mode");
+            }
 
             do {
                 records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
@@ -465,7 +468,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             // Important - always commit the consumer offsets after
             // records are fully written to Kestra's internal storage
             consumer.commitSync();
-            
+
             count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
 
             return Output.builder()
