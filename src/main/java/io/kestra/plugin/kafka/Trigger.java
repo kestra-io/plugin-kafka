@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution.
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits and committed-only reads.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
+        If a poll's underlying execution is killed or stopped, offsets are not committed, so the consumed records will be redelivered on the next poll.
         Records are stored in internal storage at `{{ trigger.uri }}`; defaults use STRING deserializers.
         Use header filters to drop mismatching records or switch to [RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) for one-execution-per-record.
         """

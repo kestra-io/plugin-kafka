@@ -60,6 +60,7 @@ import java.util.stream.StreamSupport;
     title = "Read Kafka records into internal storage",
     description = """
         Consumes from configured topics or regex with manual offset commits (auto-commit disabled) and committed-only reads by default.
+        If the execution is killed or stopped, offsets are not committed, so the consumed records will be redelivered on the next run.
         Writes all fetched records to Kestra internal storage as ION at `uri` and returns the count.
         Defaults: pollDuration PT5S, STRING deserializers, Avro logical type converters enabled.
         Use `groupType: CONSUMER` (default, backward compatible) for classic consumer groups, or `groupType: SHARE` for queue semantics with share groups and explicit acknowledgements.
