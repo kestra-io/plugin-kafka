@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
@@ -346,7 +347,7 @@ class ConsumeTest {
         var groupId = "tu_kill_group_" + IdUtils.create();
 
         Consume task = Consume.builder()
-            .id(ConsumeTest.class.getSimpleName())
+            .id(IdUtils.create())
             .type(Consume.class.getName())
             .topic(topic)
             .groupId(Property.ofValue(groupId))
@@ -357,7 +358,7 @@ class ConsumeTest {
             .build();
 
         var completed = new CountDownLatch(1);
-        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var thrown = new AtomicReference<Throwable>();
         RunContext runContext = runContextFactory.of(Map.of());
         Thread runner = new Thread(() -> {
             try {
@@ -387,12 +388,53 @@ class ConsumeTest {
     }
 
     @Test
+    void shouldTerminatePromptlyOnKillIssuedBeforeConsumerIsRegistered() throws Exception {
+        // Races kill() against the window between run() starting and the consumer being published
+        // to consumerRef: if kill() lands in that window, stop() finds no consumer to wake up, and
+        // only the isActive check now guards the first poll() from running for the full pollDuration.
+        var topic = "tu_kill_early_" + IdUtils.create();
+        var groupId = "tu_kill_early_group_" + IdUtils.create();
+
+        Consume task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        var completed = new CountDownLatch(1);
+        var thrown = new AtomicReference<Throwable>();
+        RunContext runContext = runContextFactory.of(Map.of());
+        Thread runner = new Thread(() -> {
+            try {
+                task.run(runContext);
+            } catch (Throwable t) {
+                thrown.set(t);
+            } finally {
+                completed.countDown();
+            }
+        });
+        runner.start();
+
+        // No sleep here on purpose: kill() must race the consumer's construction/subscription.
+        task.kill();
+
+        assertThat("Consume task must terminate promptly even when killed before the consumer is constructed",
+            completed.await(15, TimeUnit.SECONDS), is(true));
+        assertThat("A killed run() must not be reported as a clean success", thrown.get(), notNullValue());
+    }
+
+    @Test
     void shouldNotCommitOffsetsOnKill() throws Exception {
         var topic = "tu_kill_offset_" + IdUtils.create();
         var groupId = "tu_kill_offset_group_" + IdUtils.create();
 
         Consume task = Consume.builder()
-            .id(ConsumeTest.class.getSimpleName())
+            .id(IdUtils.create())
             .type(Consume.class.getName())
             .topic(topic)
             .groupId(Property.ofValue(groupId))
@@ -437,7 +479,7 @@ class ConsumeTest {
         var groupId = "tu_kill_share_group_" + IdUtils.create();
 
         Consume task = Consume.builder()
-            .id(ConsumeTest.class.getSimpleName())
+            .id(IdUtils.create())
             .type(Consume.class.getName())
             .topic(topic)
             .groupId(Property.ofValue(groupId))
@@ -450,7 +492,7 @@ class ConsumeTest {
             .build();
 
         var completed = new CountDownLatch(1);
-        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var thrown = new AtomicReference<Throwable>();
         RunContext runContext = runContextFactory.of(Map.of());
         Thread runner = new Thread(() -> {
             try {

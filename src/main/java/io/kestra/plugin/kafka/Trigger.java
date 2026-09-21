@@ -173,6 +173,8 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     // and kill() may arrive before or after any evaluation has started.
     @Getter(AccessLevel.NONE)
     @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private final transient AtomicReference<Consume> activeConsumeTask = new AtomicReference<>();
 
     protected Consume consumeTask() {
