@@ -1,13 +1,19 @@
 package io.kestra.plugin.kafka;
 
 
+import com.google.common.collect.ImmutableMap;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.junit.annotations.KestraTest;
+import io.kestra.core.utils.IdUtils;
+import io.kestra.plugin.kafka.serdes.SerdeType;
+import io.micronaut.context.annotation.Value;
 import jakarta.inject.Inject;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.MockConsumer;
@@ -21,20 +27,29 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.lessThan;
+import static org.hamcrest.Matchers.notNullValue;
 
 @KestraTest
 class ConsumeTest {
 
     @Inject
     private RunContextFactory runContextFactory;
+
+    @Value("${kafka.bootstrap}")
+    private String bootstrap;
 
     @Test
     void shouldThrowIllegalGivenNoTopicAnNoPattern() {
@@ -323,5 +338,160 @@ class ConsumeTest {
 
         var exception = Assertions.assertThrows(IllegalStateException.class, () -> QueueAcknowledgeType.RENEW.toKafkaType());
         Assertions.assertTrue(exception.getMessage().contains("not supported"));
+    }
+
+    @Test
+    void shouldTerminatePromptlyOnKill() throws Exception {
+        var topic = "tu_kill_" + IdUtils.create();
+        var groupId = "tu_kill_group_" + IdUtils.create();
+
+        Consume task = Consume.builder()
+            .id(ConsumeTest.class.getSimpleName())
+            .type(Consume.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        var completed = new CountDownLatch(1);
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        RunContext runContext = runContextFactory.of(Map.of());
+        Thread runner = new Thread(() -> {
+            try {
+                task.run(runContext);
+            } catch (Throwable t) {
+                thrown.set(t);
+            } finally {
+                completed.countDown();
+            }
+        });
+        runner.start();
+
+        // Give the consumer time to join the group and reach the blocking poll() before producing.
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        produceRecords(topic, 5);
+        // Let the first (non-blocking) poll pick up the records and write them to internal storage
+        // before the second poll blocks waiting for more, which is the call kill() must interrupt.
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+
+        long killStart = System.currentTimeMillis();
+        task.kill();
+        long killElapsedMs = System.currentTimeMillis() - killStart;
+
+        assertThat("kill() must not block for the full pollDuration", killElapsedMs, lessThan(15000L));
+        assertThat("Consume task must terminate after kill()", completed.await(15, TimeUnit.SECONDS), is(true));
+        assertThat("A killed run() must not be reported as a clean success", thrown.get(), notNullValue());
+    }
+
+    @Test
+    void shouldNotCommitOffsetsOnKill() throws Exception {
+        var topic = "tu_kill_offset_" + IdUtils.create();
+        var groupId = "tu_kill_offset_group_" + IdUtils.create();
+
+        Consume task = Consume.builder()
+            .id(ConsumeTest.class.getSimpleName())
+            .type(Consume.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        var completed = new CountDownLatch(1);
+        RunContext runContext = runContextFactory.of(Map.of());
+        Thread runner = new Thread(() -> {
+            try {
+                task.run(runContext);
+            } catch (Throwable ignored) {
+                // expected: a killed run surfaces as a failure rather than a clean success
+            } finally {
+                completed.countDown();
+            }
+        });
+        runner.start();
+
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        produceRecords(topic, 5);
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+
+        task.kill();
+        assertThat("Consume task must terminate after kill()", completed.await(15, TimeUnit.SECONDS), is(true));
+
+        try (AdminClient adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, this.bootstrap))) {
+            var offsets = adminClient.listConsumerGroupOffsets(groupId)
+                .partitionsToOffsetAndMetadata()
+                .get(15, TimeUnit.SECONDS);
+
+            assertThat("A killed consume task must not commit offsets (at-least-once redelivery)", offsets.isEmpty(), is(true));
+        }
+    }
+
+    @Test
+    void shouldTerminatePromptlyOnKillGivenShareGroup() throws Exception {
+        var topic = "tu_kill_share_" + IdUtils.create();
+        var groupId = "tu_kill_share_group_" + IdUtils.create();
+
+        Consume task = Consume.builder()
+            .id(ConsumeTest.class.getSimpleName())
+            .type(Consume.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .groupType(Property.ofValue(GroupType.SHARE))
+            .acknowledgeType(Property.ofValue(QueueAcknowledgeType.ACCEPT))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        var completed = new CountDownLatch(1);
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        RunContext runContext = runContextFactory.of(Map.of());
+        Thread runner = new Thread(() -> {
+            try {
+                task.run(runContext);
+            } catch (Throwable t) {
+                thrown.set(t);
+            } finally {
+                completed.countDown();
+            }
+        });
+        runner.start();
+
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        produceRecords(topic, 5);
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+
+        long killStart = System.currentTimeMillis();
+        task.kill();
+        long killElapsedMs = System.currentTimeMillis() - killStart;
+
+        assertThat("SHARE consume task kill() must not block for the full pollDuration", killElapsedMs, lessThan(15000L));
+        assertThat("SHARE consume task must terminate after kill()", completed.await(15, TimeUnit.SECONDS), is(true));
+        assertThat("A killed SHARE run() must not be reported as a clean success", thrown.get(), notNullValue());
+    }
+
+    private void produceRecords(String topic, int count) throws Exception {
+        var records = new ArrayList<Map<String, String>>();
+        for (int i = 0; i < count; i++) {
+            records.add(ImmutableMap.of("key", "key" + i, "value", "value" + i));
+        }
+
+        Produce produce = Produce.builder()
+            .id(ConsumeTest.class.getSimpleName())
+            .type(Produce.class.getName())
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(records)
+            .build();
+
+        produce.run(runContextFactory.of(Map.of()));
     }
 }

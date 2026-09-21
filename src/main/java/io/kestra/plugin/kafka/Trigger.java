@@ -1,5 +1,6 @@
 package io.kestra.plugin.kafka;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -17,6 +18,7 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 @SuperBuilder
 @ToString
@@ -164,6 +166,14 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     @PluginProperty(group = "processing")
     private Property<Boolean> deduplicate = Property.ofValue(false);
 
+    // Holds the Consume instance built by the current evaluate() call so kill()/stop() can be
+    // forwarded to it. A fresh Consume is built on every evaluate(), so this must be an
+    // AtomicReference rather than a plain field: a killed evaluation must not poison later ones,
+    // and kill() may arrive before or after any evaluation has started.
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    private final transient AtomicReference<Consume> activeConsumeTask = new AtomicReference<>();
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -194,7 +204,13 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
         Logger logger = runContext.logger();
 
         Consume task = consumeTask();
-        Consume.Output run = task.run(runContext);
+        this.activeConsumeTask.set(task);
+        Consume.Output run;
+        try {
+            run = task.run(runContext);
+        } finally {
+            this.activeConsumeTask.compareAndSet(task, null);
+        }
 
         if (logger.isDebugEnabled()) {
             logger.debug("Found '{}' messages for: '{}'", run.getMessagesCount(), task.getSubscription());
@@ -207,5 +223,21 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
         Execution execution = TriggerService.generateExecution(this, conditionContext, context, run);
 
         return Optional.of(execution);
+    }
+
+    /**
+     * {@inheritDoc}
+     **/
+    @Override
+    public void kill() {
+        Optional.ofNullable(this.activeConsumeTask.get()).ifPresent(Consume::kill);
+    }
+
+    /**
+     * {@inheritDoc}
+     **/
+    @Override
+    public void stop() {
+        Optional.ofNullable(this.activeConsumeTask.get()).ifPresent(Consume::stop);
     }
 }

@@ -1,5 +1,6 @@
 package io.kestra.plugin.kafka;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.annotations.VisibleForTesting;
 import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
@@ -23,9 +24,11 @@ import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.LoggerFactory;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -38,7 +41,10 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.chrono.ChronoZonedDateTime;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -293,6 +299,24 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @PluginProperty(group = "processing")
     private Property<Map<String, String>> headerFilters;
 
+    // Lifecycle state for kill()/stop() support — mirrors RealtimeTrigger. Not a plugin property:
+    // must stay out of the JSON schema and Jackson (de)serialization.
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    private final transient AtomicBoolean isActive = new AtomicBoolean(true);
+
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    private final transient AtomicReference<Consumer<Object, Object>> consumerRef = new AtomicReference<>();
+
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    private final transient AtomicReference<ShareConsumer<Object, Object>> shareConsumerRef = new AtomicReference<>();
+
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    private final transient CountDownLatch waitForTermination = new CountDownLatch(1);
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     public KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
@@ -379,6 +403,67 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         return runContext.render(this.acknowledgeType).as(QueueAcknowledgeType.class).orElse(QueueAcknowledgeType.ACCEPT);
     }
 
+    /**
+     * {@inheritDoc}
+     **/
+    @Override
+    public void kill() {
+        stop(true);
+    }
+
+    /**
+     * {@inheritDoc}
+     **/
+    @Override
+    public void stop() {
+        stop(false); // must be non-blocking
+    }
+
+    private void stop(boolean wait) {
+        if (!isActive.compareAndSet(true, false)) {
+            return;
+        }
+
+        // Logging here requires a stable logger reference since RunContext may not be available
+        LoggerFactory.getLogger(Consume.class)
+            .debug("Stopping Kafka consume task id={} (wait={})", this.id, wait);
+
+        var hasConsumer = consumerRef.get() != null || shareConsumerRef.get() != null;
+        Optional.ofNullable(consumerRef.get()).ifPresent(Consumer::wakeup);
+        Optional.ofNullable(shareConsumerRef.get()).ifPresent(ShareConsumer::wakeup);
+
+        if (wait && hasConsumer) {
+            try {
+                this.waitForTermination.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /**
+     * Handles a {@link WakeupException} raised from a blocking {@code poll()} call.
+     * If the task is still active, this is a spurious/third-party wakeup and must be treated as a
+     * real error (rethrown). Otherwise, it is the expected result of {@link #kill()}/{@link #stop()}
+     * and the poll loop should simply exit without committing.
+     */
+    private void handleWakeup(WakeupException e, String consumerKind) {
+        if (isActive.get()) {
+            throw e;
+        }
+        LoggerFactory.getLogger(Consume.class).debug("Kafka {} woken up; stopping poll loop without committing", consumerKind);
+    }
+
+    /**
+     * Discards partial output instead of committing offsets/acknowledgements when the task was killed,
+     * so already-fetched-but-unwritten records remain available for redelivery (at-least-once).
+     */
+    private void throwIfKilled() throws InterruptedException {
+        if (!isActive.get()) {
+            throw new InterruptedException("Kafka consume task was killed before completion");
+        }
+    }
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
@@ -397,42 +482,54 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE);
             var consumer = this.consumer(runContext)
         ) {
-            this.subscription = topicSubscription(runContext);
-            this.subscription.subscribe(runContext, consumer, this);
+            this.consumerRef.set(consumer);
+            try {
+                this.subscription = topicSubscription(runContext);
+                this.subscription.subscribe(runContext, consumer, this);
 
-            var count = new HashMap<String, Integer>();
-            var total = new AtomicInteger();
-            var lastOffsets = new HashMap<TopicPartition, Long>();
-            var started = ZonedDateTime.now();
-            ConsumerRecords<Object, Object> records;
-            boolean empty;
-            var deduplicate = runContext.render(this.deduplicate).as(Boolean.class).orElse(false);
+                var count = new HashMap<String, Integer>();
+                var total = new AtomicInteger();
+                var lastOffsets = new HashMap<TopicPartition, Long>();
+                var started = ZonedDateTime.now();
+                ConsumerRecords<Object, Object> records;
+                boolean empty;
+                var deduplicate = runContext.render(this.deduplicate).as(Boolean.class).orElse(false);
 
-            do {
-                records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
-                empty = records.isEmpty();
-                total.addAndGet(processConsumerRecords(runContext, records, deduplicate, lastOffsets, consumerRecord -> {
-                    FileSerde.write(output, this.recordToMessage(consumerRecord));
-                    count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
-                }));
+                try {
+                    do {
+                        records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
+                        empty = records.isEmpty();
+                        total.addAndGet(processConsumerRecords(runContext, records, deduplicate, lastOffsets, consumerRecord -> {
+                            FileSerde.write(output, this.recordToMessage(consumerRecord));
+                            count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
+                        }));
+                    }
+                    while (!this.ended(runContext, empty, total, started));
+                } catch (WakeupException e) {
+                    handleWakeup(e, "consumer");
+                }
+
+                throwIfKilled();
+
+                output.flush();
+                var uri = runContext.storage().putFile(tempFile);
+
+                if (this.groupId != null) {
+                    // Important - always commit the consumer offsets after
+                    // records are fully written to Kestra's internal storage
+                    consumer.commitSync();
+                }
+
+                count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
+
+                return Output.builder()
+                    .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
+                    .uri(uri)
+                    .build();
+            } finally {
+                this.consumerRef.set(null);
+                this.waitForTermination.countDown();
             }
-            while (!this.ended(runContext, empty, total, started));
-
-            output.flush();
-            var uri = runContext.storage().putFile(tempFile);
-
-            if (this.groupId != null) {
-                // Important - always commit the consumer offsets after
-                // records are fully written to Kestra's internal storage
-                consumer.commitSync();
-            }
-
-            count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
-
-            return Output.builder()
-                .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
-                .uri(uri)
-                .build();
         }
     }
 
@@ -442,39 +539,51 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE);
             var consumer = this.shareConsumer(runContext)
         ) {
-            shareSubscribe(runContext, consumer);
+            this.shareConsumerRef.set(consumer);
+            try {
+                shareSubscribe(runContext, consumer);
 
-            var count = new HashMap<String, Integer>();
-            var total = new AtomicInteger();
-            var started = ZonedDateTime.now();
-            ConsumerRecords<Object, Object> records;
-            boolean empty;
-            if (runContext.render(this.deduplicate).as(Boolean.class).orElse(false)) {
-                 runContext.logger().warn("Deduplication is not supported for SHARE consumer mode");
+                var count = new HashMap<String, Integer>();
+                var total = new AtomicInteger();
+                var started = ZonedDateTime.now();
+                ConsumerRecords<Object, Object> records;
+                boolean empty;
+                if (runContext.render(this.deduplicate).as(Boolean.class).orElse(false)) {
+                     runContext.logger().warn("Deduplication is not supported for SHARE consumer mode");
+                }
+
+                try {
+                    do {
+                        records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
+                        empty = records.isEmpty();
+                        total.addAndGet(processShareConsumerRecords(runContext, consumer, records, consumerRecord -> {
+                            FileSerde.write(output, this.recordToMessage(consumerRecord));
+                            count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
+                        }));
+                    }
+                    while (!this.ended(runContext, empty, total, started));
+                } catch (WakeupException e) {
+                    handleWakeup(e, "share consumer");
+                }
+
+                throwIfKilled();
+
+                output.flush();
+                var uri = runContext.storage().putFile(tempFile);
+                // Important - always commit the consumer offsets after
+                // records are fully written to Kestra's internal storage
+                consumer.commitSync();
+
+                count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
+
+                return Output.builder()
+                    .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
+                    .uri(uri)
+                    .build();
+            } finally {
+                this.shareConsumerRef.set(null);
+                this.waitForTermination.countDown();
             }
-
-            do {
-                records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
-                empty = records.isEmpty();
-                total.addAndGet(processShareConsumerRecords(runContext, consumer, records, consumerRecord -> {
-                    FileSerde.write(output, this.recordToMessage(consumerRecord));
-                    count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
-                }));
-            }
-            while (!this.ended(runContext, empty, total, started));
-
-            output.flush();
-            var uri = runContext.storage().putFile(tempFile);
-            // Important - always commit the consumer offsets after
-            // records are fully written to Kestra's internal storage
-            consumer.commitSync();
-
-            count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
-
-            return Output.builder()
-                .messagesCount(count.values().stream().mapToInt(Integer::intValue).sum())
-                .uri(uri)
-                .build();
         }
     }
 
@@ -584,6 +693,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @SuppressWarnings("RedundantIfStatement")
     private boolean ended(RunContext runContext, Boolean empty, AtomicInteger count, ZonedDateTime start) throws IllegalVariableEvaluationException {
+        if (!isActive.get()) {
+            return true;
+        }
+
         if (Boolean.TRUE.equals(empty)) {
             return true;
         }
