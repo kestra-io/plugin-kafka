@@ -64,7 +64,7 @@ class AbstractKafkaAdminTaskTest {
             RunContext runContext = runContextFactory.of(Map.of());
             TopicList task = TopicList.builder()
                 .properties(Property.ofValue(Map.of("bootstrap.servers", "localhost:" + blackhole.getLocalPort())))
-                .timeout(Property.ofValue(Duration.ofSeconds(2)))
+                .callTimeout(Property.ofValue(Duration.ofSeconds(2)))
                 .build();
 
             long start = System.nanoTime();
@@ -75,5 +75,12 @@ class AbstractKafkaAdminTaskTest {
             // the 60s Kafka default.api.timeout.ms this used to silently fall back to on close()
             assertThat(elapsedMs, lessThan(10_000L));
         }
+    }
+
+    @Test
+    void shouldNotShadowTaskLevelTimeout() {
+        // shadowing Task#timeout would make one YAML key both bound the AdminClient call and let the worker kill
+        // the task; the kill wins and killed tasks are not retried, so `retry:` would silently stop working
+        assertThrows(NoSuchFieldException.class, () -> AbstractKafkaAdminTask.class.getDeclaredField("timeout"));
     }
 }

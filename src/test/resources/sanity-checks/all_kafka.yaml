@@ -33,15 +33,19 @@ tasks:
       - "{{ outputs.init.values.port }}:9092"
     wait: false
 
+  # callTimeout (not `timeout`): the task-level `timeout` makes the worker KILL the task, and a killed task is
+  # never retried, so `retry:` below would be dead config. callTimeout bounds the AdminClient call instead, so a
+  # not-yet-booted broker fails as a normal exception that retry can act on.
+  # Budget: a cold cp-kafka on a contended runner can take well over a minute to answer metadata calls.
   - id: wait_kafka
     type: io.kestra.plugin.kafka.TopicList
     properties:
       bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
-    timeout: PT5S
+    callTimeout: PT10S
     retry:
       type: constant
       interval: PT2S
-      maxDuration: PT1M
+      maxDuration: PT4M
       warningOnRetry: true
 
   - id: topic_create
@@ -50,10 +54,11 @@ tasks:
       bootstrap.servers: "localhost:{{ outputs.init.values.port }}"
     topic: "sanity.classic.{{ execution.id }}"
     partitions: 1
+    callTimeout: PT10S
     retry:
       type: constant
       interval: PT2S
-      maxDuration: PT30S
+      maxDuration: PT1M
       warningOnRetry: true
 
   - id: produce_classic

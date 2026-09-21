@@ -37,20 +37,24 @@ public abstract class AbstractKafkaAdminTask extends Task {
     @PluginProperty(group = "main")
     protected Property<Map<String, String>> properties;
 
+    // Deliberately NOT named `timeout`: Task already declares one, and shadowing it makes a single YAML key mean
+    // both "bound the AdminClient call" and "let the worker kill the task". The kill wins, and a killed task is not
+    // retried, so `retry:` silently stops working on admin tasks.
     @Schema(
         title = "AdminClient call timeout",
-        description = "Maximum duration to wait for each AdminClient operation to complete before failing the task. Defaults to `PT30S` (30 seconds)."
+        description = "Maximum duration to wait for each AdminClient operation to complete before failing the task. Defaults to `PT30S` (30 seconds). " +
+            "Distinct from the task-level `timeout`, which lets the worker kill the task without retrying it."
     )
     @NotNull
     @Builder.Default
     @PluginProperty(group = "advanced")
-    protected Property<Duration> timeout = Property.ofValue(Duration.ofSeconds(30));
+    protected Property<Duration> callTimeout = Property.ofValue(Duration.ofSeconds(30));
 
     protected Properties createAdminProperties(RunContext runContext) throws Exception {
         var props = KafkaClientProperties.create(this.properties, runContext);
         // AdminClient.close() with no argument drains under Kafka's default.api.timeout.ms (60s default), not our
-        // `timeout` property, so a task configured to fail fast still blocks on close(). Seed both so the client
-        // itself is bounded by `timeout` end to end; putIfAbsent so an explicit value in `properties` still wins.
+        // `callTimeout` property, so a task configured to fail fast still blocks on close(). Seed both so the client
+        // itself is bounded by `callTimeout` end to end; putIfAbsent so an explicit value in `properties` still wins.
         var timeoutMillis = (int) renderTimeout(runContext).toMillis();
         props.putIfAbsent(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, timeoutMillis);
         props.putIfAbsent(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, timeoutMillis);
@@ -58,7 +62,7 @@ public abstract class AbstractKafkaAdminTask extends Task {
     }
 
     protected Duration renderTimeout(RunContext runContext) throws IllegalVariableEvaluationException {
-        return runContext.render(this.timeout).as(Duration.class).orElse(Duration.ofSeconds(30));
+        return runContext.render(this.callTimeout).as(Duration.class).orElse(Duration.ofSeconds(30));
     }
 
     protected static <T> T requireRendered(RunContext runContext, Property<T> property, Class<T> type, String fieldName) throws IllegalVariableEvaluationException {
@@ -90,7 +94,7 @@ public abstract class AbstractKafkaAdminTask extends Task {
             throw e;
         } catch (TimeoutException e) {
             throw (TimeoutException) new TimeoutException(
-                "AdminClient operation did not complete within " + timeout + " — increase the `timeout` property or check broker connectivity"
+                "AdminClient operation did not complete within " + timeout + " — increase the `callTimeout` property or check broker connectivity"
             ).initCause(e);
         }
     }
