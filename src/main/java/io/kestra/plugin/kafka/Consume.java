@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.annotations.VisibleForTesting;
 import io.confluent.kafka.serializers.KafkaAvroSerializerConfig;
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.exceptions.KilledException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
@@ -42,6 +43,7 @@ import java.time.ZonedDateTime;
 import java.time.chrono.ChronoZonedDateTime;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -60,7 +62,8 @@ import java.util.stream.StreamSupport;
     title = "Read Kafka records into internal storage",
     description = """
         Consumes from configured topics or regex with manual offset commits (auto-commit disabled) and committed-only reads by default.
-        If the execution is killed or stopped, offsets are not committed, so the consumed records will be redelivered on the next run.
+        If the execution is killed, offsets are not committed, so the consumed records will be redelivered on the next run.
+        A graceful stop (e.g. worker restart) instead completes normally: it commits what has already been consumed and returns a partial result.
         Writes all fetched records to Kestra internal storage as ION at `uri` and returns the count.
         Defaults: pollDuration PT5S, STRING deserializers, Avro logical type converters enabled.
         Use `groupType: CONSUMER` (default, backward compatible) for classic consumer groups, or `groupType: SHARE` for queue semantics with share groups and explicit acknowledgements.
@@ -314,6 +317,14 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @EqualsAndHashCode.Exclude
     private final transient AtomicBoolean isActive = new AtomicBoolean(true);
 
+    // Set only by kill(), never by stop(): distinguishes a hard kill (must not commit, at-least-once
+    // redelivery) from a graceful stop (should commit what's already consumed and complete normally).
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final transient AtomicBoolean isKilled = new AtomicBoolean(false);
+
     @Getter(AccessLevel.NONE)
     @JsonIgnore
     @ToString.Exclude
@@ -418,11 +429,18 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         return runContext.render(this.acknowledgeType).as(QueueAcknowledgeType.class).orElse(QueueAcknowledgeType.ACCEPT);
     }
 
+    // Ceiling on kill()'s wait for consumer teardown, aligned with kafka-clients' own ~30s default
+    // close() timeout. Core dispatches kill() to every running task/trigger on the node from a single
+    // synchronized block (DefaultWorker), so an unbounded await() here would stall kill processing
+    // for everything else on the worker if teardown ever hangs.
+    private static final Duration TERMINATION_AWAIT_TIMEOUT = Duration.ofSeconds(30);
+
     /**
      * {@inheritDoc}
      **/
     @Override
     public void kill() {
+        isKilled.set(true);
         stop(true);
     }
 
@@ -449,7 +467,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (wait && hasConsumer) {
             try {
-                this.waitForTermination.await();
+                if (!this.waitForTermination.await(TERMINATION_AWAIT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                    LoggerFactory.getLogger(Consume.class).warn(
+                        "Kafka consume task id={} did not terminate within {} of kill(); returning to avoid stalling the worker's kill dispatch",
+                        this.id, TERMINATION_AWAIT_TIMEOUT);
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -460,22 +482,52 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
      * Handles a {@link WakeupException} raised from a blocking {@code poll()} call.
      * If the task is still active, this is a spurious/third-party wakeup and must be treated as a
      * real error (rethrown). Otherwise, it is the expected result of {@link #kill()}/{@link #stop()}
-     * and the poll loop should simply exit without committing.
+     * and the poll loop should simply exit so the caller can decide whether to commit.
      */
     private void handleWakeup(WakeupException e, String consumerKind) {
         if (isActive.get()) {
             throw e;
         }
-        LoggerFactory.getLogger(Consume.class).debug("Kafka {} woken up; stopping poll loop without committing", consumerKind);
+        LoggerFactory.getLogger(Consume.class).debug("Kafka {} woken up; exiting poll loop", consumerKind);
     }
 
     /**
      * Discards partial output instead of committing offsets/acknowledgements when the task was killed,
      * so already-fetched-but-unwritten records remain available for redelivery (at-least-once).
+     * A graceful stop() does not throw here: it falls through to the normal completion path below,
+     * committing what has already been consumed instead of failing a routine worker shutdown.
      */
-    private void throwIfKilled() throws InterruptedException {
-        if (!isActive.get()) {
-            throw new InterruptedException("Kafka consume task was killed before completion");
+    private void throwIfKilled() {
+        if (isKilled.get()) {
+            throw new KilledException("Kafka consume task was killed before completion");
+        }
+    }
+
+    /**
+     * Cleans up a file already uploaded to internal storage when kill() interrupts the offset commit
+     * that follows it (commitSync() throwing WakeupException after putFile() has already run),
+     * so the redelivered records don't also leave an orphaned file behind.
+     */
+    private void cleanupOrphanedUpload(RunContext runContext, URI uri) {
+        try {
+            runContext.storage().deleteFile(uri);
+        } catch (Exception e) {
+            LoggerFactory.getLogger(Consume.class)
+                .warn("Failed to clean up orphaned internal-storage file '{}' after kill() interrupted the offset commit", uri, e);
+        }
+    }
+
+    /**
+     * Runs a {@code commitSync()} call, cleaning up an already-uploaded file and failing the task if
+     * kill()/stop() races in before the commit completes. Shared by the classic and share-consumer
+     * paths, which otherwise duplicate this exact try/catch.
+     */
+    private void commitOrCleanup(RunContext runContext, URI uri, Runnable commitSync) {
+        try {
+            commitSync.run();
+        } catch (WakeupException e) {
+            cleanupOrphanedUpload(runContext, uri);
+            throw new KilledException("Kafka consume task was interrupted while committing offsets");
         }
     }
 
@@ -540,7 +592,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                     if (this.groupId != null) {
                         // Important - always commit the consumer offsets after
                         // records are fully written to Kestra's internal storage
-                        consumer.commitSync();
+                        commitOrCleanup(runContext, uri, consumer::commitSync);
                     }
 
                     count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
@@ -609,7 +661,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                     var uri = runContext.storage().putFile(tempFile);
                     // Important - always commit the consumer offsets after
                     // records are fully written to Kestra's internal storage
-                    consumer.commitSync();
+                    commitOrCleanup(runContext, uri, consumer::commitSync);
 
                     count.forEach((s, integer) -> runContext.metric(Counter.of("records", integer, "topic", s)));
 

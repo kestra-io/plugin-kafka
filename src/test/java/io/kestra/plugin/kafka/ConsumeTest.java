@@ -42,6 +42,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 
 @KestraTest
 class ConsumeTest {
@@ -516,6 +517,58 @@ class ConsumeTest {
         assertThat("SHARE consume task kill() must not block for the full pollDuration", killElapsedMs, lessThan(15000L));
         assertThat("SHARE consume task must terminate after kill()", completed.await(15, TimeUnit.SECONDS), is(true));
         assertThat("A killed SHARE run() must not be reported as a clean success", thrown.get(), notNullValue());
+    }
+
+    @Test
+    void shouldCompleteGracefullyOnStop() throws Exception {
+        // Unlike kill(), a graceful stop() (e.g. worker restart) must not fail the task: it should
+        // commit what was already consumed and return a partial Output instead of throwing.
+        var topic = "tu_stop_" + IdUtils.create();
+        var groupId = "tu_stop_group_" + IdUtils.create();
+
+        Consume task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        var completed = new CountDownLatch(1);
+        var thrown = new AtomicReference<Throwable>();
+        var output = new AtomicReference<Consume.Output>();
+        RunContext runContext = runContextFactory.of(Map.of());
+        Thread runner = new Thread(() -> {
+            try {
+                output.set(task.run(runContext));
+            } catch (Throwable t) {
+                thrown.set(t);
+            } finally {
+                completed.countDown();
+            }
+        });
+        runner.start();
+
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        produceRecords(topic, 5);
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+
+        task.stop();
+        assertThat("Consume task must terminate after stop()", completed.await(15, TimeUnit.SECONDS), is(true));
+        assertThat("A graceful stop() must not fail the task", thrown.get(), nullValue());
+        assertThat("A graceful stop() must still return the already-consumed records", output.get(), notNullValue());
+        assertThat(output.get().getMessagesCount(), is(5));
+
+        try (AdminClient adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, this.bootstrap))) {
+            var offsets = adminClient.listConsumerGroupOffsets(groupId)
+                .partitionsToOffsetAndMetadata()
+                .get(15, TimeUnit.SECONDS);
+
+            assertThat("A gracefully stopped consume task must commit offsets for already-consumed records", offsets.isEmpty(), is(false));
+        }
     }
 
     private void produceRecords(String topic, int count) throws Exception {

@@ -18,6 +18,7 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 @SuperBuilder
@@ -31,7 +32,8 @@ import java.util.concurrent.atomic.AtomicReference;
         Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution.
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits and committed-only reads.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
-        If a poll's underlying execution is killed or stopped, offsets are not committed, so the consumed records will be redelivered on the next poll.
+        If a poll's underlying execution is killed, offsets are not committed, so the consumed records will be redelivered on the next poll.
+        A graceful stop (e.g. worker restart) instead completes the in-flight poll normally, committing what has already been consumed.
         Records are stored in internal storage at `{{ trigger.uri }}`; defaults use STRING deserializers.
         Use header filters to drop mismatching records or switch to [RealtimeTrigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.realtimetrigger) for one-execution-per-record.
         """
@@ -177,6 +179,16 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
     @EqualsAndHashCode.Exclude
     private final transient AtomicReference<Consume> activeConsumeTask = new AtomicReference<>();
 
+    // Sticky flag: kill()/stop() may arrive in the gap between a cycle finishing (activeConsumeTask
+    // reset to null) and the next evaluate() publishing its freshly built Consume, where the signal
+    // would otherwise find no task to forward to and be silently dropped. Never reset: once a trigger
+    // is killed or stopped, no further evaluate() cycle should be allowed to start.
+    @Getter(AccessLevel.NONE)
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final transient AtomicBoolean killedOrStopped = new AtomicBoolean(false);
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -206,8 +218,21 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
         RunContext runContext = conditionContext.getRunContext();
         Logger logger = runContext.logger();
 
+        if (killedOrStopped.get()) {
+            logger.debug("Kafka trigger id={} received kill()/stop() before this evaluation cycle started; skipping poll", this.id);
+            return Optional.empty();
+        }
+
         Consume task = consumeTask();
         this.activeConsumeTask.set(task);
+        // Re-check right after publishing: closes the gap between consumeTask() and the set() above,
+        // where a kill()/stop() landing in between finds the previous cycle's (null) activeConsumeTask
+        // and is otherwise silently dropped, letting the freshly built task run a full pollDuration.
+        if (killedOrStopped.get()) {
+            this.activeConsumeTask.compareAndSet(task, null);
+            return Optional.empty();
+        }
+
         Consume.Output run;
         try {
             run = task.run(runContext);
@@ -233,6 +258,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
      **/
     @Override
     public void kill() {
+        killedOrStopped.set(true);
         Optional.ofNullable(this.activeConsumeTask.get()).ifPresent(Consume::kill);
     }
 
@@ -241,6 +267,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
      **/
     @Override
     public void stop() {
+        killedOrStopped.set(true);
         Optional.ofNullable(this.activeConsumeTask.get()).ifPresent(Consume::stop);
     }
 }

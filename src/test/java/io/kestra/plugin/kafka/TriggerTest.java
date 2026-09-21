@@ -125,4 +125,41 @@ class TriggerTest {
         assertThat("evaluate() must return promptly after kill()", completed.await(15, TimeUnit.SECONDS), is(true));
         assertThat("A killed evaluate() must not be reported as a clean poll result", thrown.get(), notNullValue());
     }
+
+    @Test
+    void shouldSkipEvaluationWhenKillArrivesBeforeCycleStarts() throws Exception {
+        // Reproduces the gap between cycles where activeConsumeTask is null (e.g. before the very
+        // first evaluate() call): without the sticky killed/stopped flags, kill() finds no task to
+        // forward to and is silently dropped, letting the next evaluate() run a full pollDuration.
+        var topic = "tu_trigger_kill_early_" + IdUtils.create();
+        var groupId = "tu_trigger_kill_early_group_" + IdUtils.create();
+
+        Trigger trigger = Trigger.builder()
+            .id(TriggerTest.class.getSimpleName())
+            .type(Trigger.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build();
+
+        // No evaluation has run yet, so activeConsumeTask is still null: this is the exact window
+        // the sticky flags must cover.
+        trigger.kill();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        ConditionContext conditionContext = ConditionContext.builder()
+            .runContext(runContext)
+            .build();
+
+        long start = System.currentTimeMillis();
+        Optional<Execution> result = trigger.evaluate(conditionContext, null);
+        long elapsedMs = System.currentTimeMillis() - start;
+
+        assertThat("A pre-killed trigger must not fire an execution", result.isPresent(), is(false));
+        assertThat("evaluate() must skip the poll cycle instead of blocking on a fresh Consume",
+            elapsedMs, lessThan(15000L));
+    }
 }
