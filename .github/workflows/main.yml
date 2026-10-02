@@ -42,7 +42,7 @@ permissions:
 
 jobs:
   check:
-    uses: kestra-io/actions/.github/workflows/plugins.yml@main
+    uses: kestra-io/actions/.github/workflows/plugins.yml@configure-scan-trivy-sbom
     with:
       skip-test: ${{ github.event.inputs.skip-test == 'true' }}
       kestra-version: ${{ github.event.inputs.kestra-version }}
