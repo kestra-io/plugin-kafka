@@ -40,6 +40,7 @@ permissions:
   pull-requests: write
   packages: read
 
+# temp: rebuild trigger
 jobs:
   check:
     uses: kestra-io/actions/.github/workflows/plugins.yml@configure-scan-trivy-sbom
