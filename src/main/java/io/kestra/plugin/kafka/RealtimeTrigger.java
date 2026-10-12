@@ -233,6 +233,12 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @PluginProperty(group = "processing")
     private Property<Boolean> deduplicate = Property.ofValue(false);
 
+    @Schema(
+        title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution"
+    )
+    @PluginProperty(group = "advanced")
+    private Property<io.kestra.plugin.kafka.models.TraceContext> traceContext;
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -262,7 +268,56 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         Consume task = consumeTask();
 
         return Flux.from(publisher(task, runContext))
-            .map((record) -> TriggerService.generateRealtimeExecution(this, conditionContext, context, task.recordToMessage(record)));
+            .map((record) -> {
+                Message message = task.recordToMessage(record);
+                Execution execution = TriggerService.generateRealtimeExecution(this, conditionContext, context, message);
+                propagateTraceContext(runContext, record, message, execution);
+                return execution;
+            });
+    }
+
+    void propagateTraceContext(RunContext runContext,
+                               ConsumerRecord<Object, Object> record,
+                               Message message,
+                               Execution execution) {
+        if (this.traceContext == null) {
+            return;
+        }
+
+        try {
+            var renderedTraceContext = runContext.render(this.traceContext).as(io.kestra.plugin.kafka.models.TraceContext.class);
+            if (renderedTraceContext.isEmpty()) {
+                return;
+            }
+
+            var config = renderedTraceContext.get();
+            boolean enabled = config.getEnabled() != null && runContext.render(config.getEnabled()).as(Boolean.class).orElse(false);
+            if (!enabled) {
+                return;
+            }
+
+            String traceparentHeaderKey = config.getTraceparentHeader() != null
+                ? runContext.render(config.getTraceparentHeader()).as(String.class).orElse("traceparent")
+                : "traceparent";
+
+            String bodyExtractorPath = config.getBodyExtractor() != null
+                ? runContext.render(config.getBodyExtractor()).as(String.class).orElse(null)
+                : null;
+
+            String traceParent = KafkaTraceContextExtractor.extractTraceParent(
+                record,
+                message,
+                traceparentHeaderKey,
+                bodyExtractorPath,
+                runContext.logger()
+            );
+
+            if (traceParent != null) {
+                execution.setTraceParent(traceParent);
+            }
+        } catch (Exception e) {
+            runContext.logger().debug("Failed to evaluate trace context configuration: {}", e.getMessage());
+        }
     }
 
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
