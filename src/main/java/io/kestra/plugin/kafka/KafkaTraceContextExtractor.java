@@ -13,18 +13,12 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 public abstract class KafkaTraceContextExtractor {
-    // W3C TraceContext specification traceparent regex:
-    // version (00) - trace-id (32 hex) - parent-id (16 hex) - trace-flags (2 hex)
-    // All-zero trace-id or parent-id is invalid per W3C specification.
+    // W3C Trace Context traceparent format: version-trace_id-parent_id-trace_flags
     private static final Pattern W3C_TRACEPARENT_PATTERN = Pattern.compile(
         "^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$",
         Pattern.CASE_INSENSITIVE
     );
 
-    /**
-     * Extracts traceparent from ConsumerRecord headers first, then optionally from body.
-     * Never throws exceptions; returns null if not found or malformed.
-     */
     public static String extractTraceParent(
         ConsumerRecord<?, ?> record,
         Message message,
@@ -32,13 +26,11 @@ public abstract class KafkaTraceContextExtractor {
         String bodyExtractorPath,
         Logger logger
     ) {
-        // 1. Try extracting from Kafka headers
         String traceParentFromHeaders = extractFromHeaders(record, message, traceparentHeaderKey, logger);
         if (traceParentFromHeaders != null) {
             return traceParentFromHeaders;
         }
 
-        // 2. Try extracting from body if bodyExtractorPath is defined
         if (bodyExtractorPath != null && !bodyExtractorPath.isBlank()) {
             return extractFromBody(record, message, bodyExtractorPath.trim(), logger);
         }
@@ -54,7 +46,6 @@ public abstract class KafkaTraceContextExtractor {
     ) {
         String key = (headerKey != null && !headerKey.isBlank()) ? headerKey : "traceparent";
 
-        // Check ConsumerRecord headers first
         if (record != null && record.headers() != null) {
             Header header = record.headers().lastHeader(key);
             if (header != null && header.value() != null) {
@@ -63,7 +54,6 @@ public abstract class KafkaTraceContextExtractor {
             }
         }
 
-        // Check Message headers as fallback
         if (message != null && message.getHeaders() != null) {
             List<Pair<String, String>> headers = message.getHeaders();
             for (int i = headers.size() - 1; i >= 0; i--) {
@@ -142,17 +132,14 @@ public abstract class KafkaTraceContextExtractor {
         String traceId = matcher.group(2);
         String parentId = matcher.group(3);
 
-        // Version ff is forbidden by W3C specification
         if ("ff".equalsIgnoreCase(version)) {
             return false;
         }
 
-        // Trace ID cannot be all zeros
         if ("00000000000000000000000000000000".equals(traceId)) {
             return false;
         }
 
-        // Parent ID cannot be all zeros
         if ("0000000000000000".equals(parentId)) {
             return false;
         }

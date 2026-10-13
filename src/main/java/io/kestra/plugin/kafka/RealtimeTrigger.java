@@ -12,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.models.TraceContext;
 import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -134,6 +135,29 @@ import java.util.concurrent.atomic.AtomicReference;
                     groupType: SHARE
                     acknowledgeType: ACCEPT
                 """
+        ),
+        @Example(
+            full = true,
+            title = "Propagate OpenTelemetry trace context from Kafka records to flow executions",
+            code = """
+                id: kafka_realtime_trace_context
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "Received record with traceparent: {{ execution.traceParent ?? 'none' }}"
+
+                triggers:
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    groupId: orders-consumer-group
+                    traceContext:
+                      enabled: true
+                """
         )
     }
 )
@@ -237,7 +261,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution"
     )
     @PluginProperty(group = "advanced")
-    private Property<io.kestra.plugin.kafka.models.TraceContext> traceContext;
+    private TraceContext traceContext;
 
     protected Consume consumeTask() {
         return Consume.builder()
@@ -285,23 +309,17 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         }
 
         try {
-            var renderedTraceContext = runContext.render(this.traceContext).as(io.kestra.plugin.kafka.models.TraceContext.class);
-            if (renderedTraceContext.isEmpty()) {
-                return;
-            }
-
-            var config = renderedTraceContext.get();
-            boolean enabled = config.getEnabled() != null && runContext.render(config.getEnabled()).as(Boolean.class).orElse(false);
+            boolean enabled = this.traceContext.getEnabled() != null && runContext.render(this.traceContext.getEnabled()).as(Boolean.class).orElse(false);
             if (!enabled) {
                 return;
             }
 
-            String traceparentHeaderKey = config.getTraceparentHeader() != null
-                ? runContext.render(config.getTraceparentHeader()).as(String.class).orElse("traceparent")
+            String traceparentHeaderKey = this.traceContext.getTraceparentHeader() != null
+                ? runContext.render(this.traceContext.getTraceparentHeader()).as(String.class).orElse("traceparent")
                 : "traceparent";
 
-            String bodyExtractorPath = config.getBodyExtractor() != null
-                ? runContext.render(config.getBodyExtractor()).as(String.class).orElse(null)
+            String bodyExtractorPath = this.traceContext.getBodyExtractor() != null
+                ? runContext.render(this.traceContext.getBodyExtractor()).as(String.class).orElse(null)
                 : null;
 
             String traceParent = KafkaTraceContextExtractor.extractTraceParent(
