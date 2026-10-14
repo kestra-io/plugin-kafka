@@ -15,7 +15,7 @@ import lombok.AllArgsConstructor;
 public class TraceContext {
     @Schema(
         title = "Whether to extract trace context from the Kafka message and propagate it to the execution",
-        description = "Disabled by default. When enabled, W3C traceparent will be extracted."
+        description = "Disabled by default. When enabled, W3C traceparent will be extracted and propagated to the execution. Note: Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update."
     )
     @Builder.Default
     @PluginProperty(group = "advanced")

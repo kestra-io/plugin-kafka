@@ -258,7 +258,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private Property<Boolean> deduplicate = Property.ofValue(false);
 
     @Schema(
-        title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution"
+        title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution",
+        description = "Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update."
     )
     @PluginProperty(group = "advanced")
     private TraceContext traceContext;
