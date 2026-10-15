@@ -146,7 +146,7 @@ import java.util.concurrent.atomic.AtomicReference;
                 tasks:
                   - id: log
                     type: io.kestra.plugin.core.log.Log
-                    message: "Received record with traceparent: {{ execution.traceParent ?? 'none' }}"
+                    message: "Received record with headers: {{ trigger.headers }}"
 
                 triggers:
                   - id: realtime_trigger
