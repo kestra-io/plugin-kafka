@@ -12,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.models.TraceContext;
 import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -134,6 +135,29 @@ import java.util.concurrent.atomic.AtomicReference;
                     groupType: SHARE
                     acknowledgeType: ACCEPT
                 """
+        ),
+        @Example(
+            full = true,
+            title = "Propagate OpenTelemetry trace context from Kafka records to flow executions",
+            code = """
+                id: kafka_realtime_trace_context
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "Received record with headers: {{ trigger.headers }}"
+
+                triggers:
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    groupId: orders-consumer-group
+                    traceContext:
+                      enabled: true
+                """
         )
     }
 )
@@ -233,6 +257,13 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @PluginProperty(group = "processing")
     private Property<Boolean> deduplicate = Property.ofValue(false);
 
+    @Schema(
+        title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution",
+        description = "Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update."
+    )
+    @PluginProperty(group = "advanced")
+    private TraceContext traceContext;
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -262,7 +293,50 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         Consume task = consumeTask();
 
         return Flux.from(publisher(task, runContext))
-            .map((record) -> TriggerService.generateRealtimeExecution(this, conditionContext, context, task.recordToMessage(record)));
+            .map((record) -> {
+                Message message = task.recordToMessage(record);
+                Execution execution = TriggerService.generateRealtimeExecution(this, conditionContext, context, message);
+                propagateTraceContext(runContext, record, message, execution);
+                return execution;
+            });
+    }
+
+    void propagateTraceContext(RunContext runContext,
+                               ConsumerRecord<Object, Object> record,
+                               Message message,
+                               Execution execution) {
+        if (this.traceContext == null) {
+            return;
+        }
+
+        try {
+            boolean enabled = this.traceContext.getEnabled() != null && runContext.render(this.traceContext.getEnabled()).as(Boolean.class).orElse(false);
+            if (!enabled) {
+                return;
+            }
+
+            String traceparentHeaderKey = this.traceContext.getTraceparentHeader() != null
+                ? runContext.render(this.traceContext.getTraceparentHeader()).as(String.class).orElse("traceparent")
+                : "traceparent";
+
+            String bodyExtractorPath = this.traceContext.getBodyExtractor() != null
+                ? runContext.render(this.traceContext.getBodyExtractor()).as(String.class).orElse(null)
+                : null;
+
+            String traceParent = KafkaTraceContextExtractor.extractTraceParent(
+                record,
+                message,
+                traceparentHeaderKey,
+                bodyExtractorPath,
+                runContext.logger()
+            );
+
+            if (traceParent != null) {
+                execution.setTraceParent(traceParent);
+            }
+        } catch (Exception e) {
+            runContext.logger().debug("Failed to evaluate trace context configuration: {}", e.getMessage());
+        }
     }
 
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
