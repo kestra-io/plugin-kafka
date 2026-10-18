@@ -1,3 +1,7 @@
+import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.common.TopicPartition;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 package io.kestra.plugin.kafka;
 
 import io.kestra.core.models.annotations.Example;
@@ -66,9 +70,18 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
     @PluginProperty(group = "main")
     private Property<String> topic;
 
+    @Schema(
+        title = "Include partition offsets",
+        description = "When true, queries the broker for the earliest and latest offset of each partition."
+    )
+    @Builder.Default
+    @PluginProperty(group = "execution")
+    private Property<Boolean> includeOffsets = Property.ofValue(false);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rTopic = requireRendered(runContext, this.topic, String.class, "topic");
+        var rIncludeOffsets = runContext.render(this.includeOffsets).as(Boolean.class).orElse(false);
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {
@@ -82,8 +95,34 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
                 configs.put(entry.name(), entry.value());
             }
 
+            Map<TopicPartition, Long> earliestOffsets = new HashMap<>();
+            Map<TopicPartition, Long> latestOffsets = new HashMap<>();
+
+            if (rIncludeOffsets && !description.partitions().isEmpty()) {
+                var earliestQuery = description.partitions().stream()
+                    .collect(Collectors.toMap(
+                        p -> new TopicPartition(rTopic, p.partition()),
+                        p -> OffsetSpec.earliest()
+                    ));
+                var latestQuery = description.partitions().stream()
+                    .collect(Collectors.toMap(
+                        p -> new TopicPartition(rTopic, p.partition()),
+                        p -> OffsetSpec.latest()
+                    ));
+
+                var earliestResult = get(admin.listOffsets(earliestQuery).all(), timeout);
+                var latestResult = get(admin.listOffsets(latestQuery).all(), timeout);
+
+                earliestResult.forEach((tp, info) -> earliestOffsets.put(tp, info.offset()));
+                latestResult.forEach((tp, info) -> latestOffsets.put(tp, info.offset()));
+            }
+
             var partitions = description.partitions().stream()
-                .map(TopicDescribe::partitionInfo)
+                .map(p -> partitionInfo(
+                    p,
+                    earliestOffsets.get(new TopicPartition(rTopic, p.partition())),
+                    latestOffsets.get(new TopicPartition(rTopic, p.partition()))
+                ))
                 .toList();
 
             var replicationFactor = description.partitions().isEmpty() ? 0 : description.partitions().getFirst().replicas().size();
@@ -98,12 +137,18 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
         }
     }
 
-    private static Map<String, Object> partitionInfo(TopicPartitionInfo info) {
+    private static Map<String, Object> partitionInfo(TopicPartitionInfo info, Long earliest, Long latest) {
         var partition = new LinkedHashMap<String, Object>();
         partition.put("partition", info.partition());
         partition.put("leader", info.leader() != null ? info.leader().idString() : null);
         partition.put("replicas", info.replicas().stream().map(Node::idString).toList());
         partition.put("isr", info.isr().stream().map(Node::idString).toList());
+        if (earliest != null) {
+            partition.put("earliestOffset", earliest);
+        }
+        if (latest != null) {
+            partition.put("latestOffset", latest);
+        }
         return partition;
     }
 
@@ -119,7 +164,7 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
         @Schema(title = "Replication factor")
         private final Integer replicationFactor;
 
-        @Schema(title = "Per-partition layout", description = "Each entry contains `partition`, `leader`, `replicas` and `isr` (in-sync replicas broker IDs).")
+        @Schema(title = "Per-partition layout", description = "Each entry contains `partition`, `leader`, `replicas`, `isr` (in-sync replicas broker IDs), and optionally `earliestOffset` and `latestOffset` when `includeOffsets` is true.")
         private final List<Map<String, Object>> partitions;
 
         @Schema(title = "Effective topic configuration", description = "For example `retention.ms`, `cleanup.policy`.")
