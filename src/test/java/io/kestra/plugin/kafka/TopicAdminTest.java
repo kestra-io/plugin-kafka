@@ -241,4 +241,31 @@ class TopicAdminTest {
             TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
         }
     }
+
+    @Test
+    void describeTopicWithIncludeOffsets() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String topic = "tu_admin_offsets_" + IdUtils.create();
+
+        TopicCreate create = TopicCreate.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .partitions(Property.ofValue(2))
+            .replicationFactor(Property.ofValue(1))
+            .build();
+        create.run(runContext);
+
+        TopicDescribe describe = TopicDescribe.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .includeOffsets(Property.ofValue(true))
+            .build();
+
+        TopicDescribe.Output output = describe.run(runContext);
+        assertThat(output.getPartitionCount(), is(2));
+        for (Map<String, Object> partition : output.getPartitions()) {
+            assertThat(partition.get("earliestOffset"), notNullValue());
+            assertThat(partition.get("latestOffset"), notNullValue());
+        }
+    }
 }
