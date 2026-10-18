@@ -589,4 +589,38 @@ class ConsumeTest {
 
         produce.run(runContextFactory.of(Map.of()));
     }
+
+    @Test
+    void ended_respectsMaxDurationOverPollDuration() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        Consume task = Consume.builder()
+            .id("test-consume")
+            .type(Consume.class.getName())
+            .topic(Property.ofValue("test-topic"))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(1)))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
+            .build();
+
+        ZonedDateTime start = ZonedDateTime.now().minusSeconds(2);
+        org.hamcrest.MatcherAssert.assertThat(task.ended(runContext, false, new java.util.concurrent.atomic.AtomicInteger(1), start), org.hamcrest.Matchers.is(false));
+
+        ZonedDateTime expiredStart = ZonedDateTime.now().minusSeconds(11);
+        org.hamcrest.MatcherAssert.assertThat(task.ended(runContext, false, new java.util.concurrent.atomic.AtomicInteger(1), expiredStart), org.hamcrest.Matchers.is(true));
+    }
+
+    @Test
+    void ended_fallsBackToPollDurationWhenMaxDurationNotSet() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        Consume task = Consume.builder()
+            .id("test-consume")
+            .type(Consume.class.getName())
+            .topic(Property.ofValue("test-topic"))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+            .build();
+
+        ZonedDateTime start = ZonedDateTime.now().minusSeconds(3);
+        org.hamcrest.MatcherAssert.assertThat(task.ended(runContext, false, new java.util.concurrent.atomic.AtomicInteger(1), start), org.hamcrest.Matchers.is(true));
+    }
 }
