@@ -16,13 +16,17 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.ConfigEntry;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.common.Node;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @SuperBuilder
 @ToString
@@ -33,6 +37,7 @@ import java.util.Map;
     title = "Describe a Kafka topic",
     description = """
         Returns a topic's partition layout (leader, replicas, in-sync replicas) and its effective configuration.
+        Set `includeOffsets` to `true` to also return each partition's log start and log end offsets.
         Fails with `UnknownTopicOrPartitionException` if the topic does not exist.
         """
 )
@@ -56,6 +61,26 @@ import java.util.Map;
                     type: io.kestra.plugin.core.log.Log
                     message: "retention.ms = {{ outputs.topic_describe.configs['retention.ms'] }}"
                 """
+        ),
+        @Example(
+            title = "Inspect partition offsets after retention",
+            full = true,
+            code = """
+                id: kafka_topic_offsets
+                namespace: company.team
+
+                tasks:
+                  - id: describe_offsets
+                    type: io.kestra.plugin.kafka.TopicDescribe
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    topic: orders
+                    includeOffsets: true
+
+                  - id: log_offsets
+                    type: io.kestra.plugin.core.log.Log
+                    message: "{{ outputs.describe_offsets.partitions }}"
+                """
         )
     }
 )
@@ -66,9 +91,20 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
     @PluginProperty(group = "main")
     private Property<String> topic;
 
+    @Schema(
+        title = "Include per-partition earliest and latest offsets",
+        description = "When enabled, fetches the log start offset (`earliestOffset`) and log end offset (`latestOffset`, the next offset to be written) for each partition. " +
+            "Offsets are fetched in separate requests and can change while the task runs. Defaults to `false`, which omits these fields and skips offset requests."
+    )
+    @NotNull
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<Boolean> includeOffsets = Property.ofValue(false);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rTopic = requireRendered(runContext, this.topic, String.class, "topic");
+        var rIncludeOffsets = runContext.render(this.includeOffsets).as(Boolean.class).orElse(false);
         var timeout = renderTimeout(runContext);
 
         try (AdminClient admin = AdminClient.create(createAdminProperties(runContext))) {
@@ -82,8 +118,22 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
                 configs.put(entry.name(), entry.value());
             }
 
+            var topicPartitions = description.partitions().stream()
+                .map(info -> new TopicPartition(rTopic, info.partition()))
+                .toList();
+            var earliestOffsets = rIncludeOffsets ? fetchOffsets(admin, topicPartitions, OffsetSpec.earliest(), timeout) : Map.<TopicPartition, Long>of();
+            var latestOffsets = rIncludeOffsets ? fetchOffsets(admin, topicPartitions, OffsetSpec.latest(), timeout) : Map.<TopicPartition, Long>of();
+
             var partitions = description.partitions().stream()
-                .map(TopicDescribe::partitionInfo)
+                .map(info -> {
+                    var partition = partitionInfo(info);
+                    if (rIncludeOffsets) {
+                        var topicPartition = new TopicPartition(rTopic, info.partition());
+                        partition.put("earliestOffset", earliestOffsets.get(topicPartition));
+                        partition.put("latestOffset", latestOffsets.get(topicPartition));
+                    }
+                    return partition;
+                })
                 .toList();
 
             var replicationFactor = description.partitions().isEmpty() ? 0 : description.partitions().getFirst().replicas().size();
@@ -96,6 +146,15 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
                 .configs(configs)
                 .build();
         }
+    }
+
+    private static Map<TopicPartition, Long> fetchOffsets(AdminClient admin, List<TopicPartition> partitions, OffsetSpec offsetSpec, Duration timeout) throws Exception {
+        if (partitions.isEmpty()) {
+            return Map.of();
+        }
+        var specs = partitions.stream().collect(Collectors.toMap(topicPartition -> topicPartition, topicPartition -> offsetSpec));
+        return get(admin.listOffsets(specs).all(), timeout).entrySet().stream()
+            .collect(Collectors.toMap(Map.Entry::getKey, entry -> entry.getValue().offset()));
     }
 
     private static Map<String, Object> partitionInfo(TopicPartitionInfo info) {
@@ -119,7 +178,7 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
         @Schema(title = "Replication factor")
         private final Integer replicationFactor;
 
-        @Schema(title = "Per-partition layout", description = "Each entry contains `partition`, `leader`, `replicas` and `isr` (in-sync replicas broker IDs).")
+        @Schema(title = "Per-partition layout", description = "Each entry contains `partition`, `leader`, `replicas` and `isr` (in-sync replicas broker IDs), plus `earliestOffset` and `latestOffset` when `includeOffsets` is enabled.")
         private final List<Map<String, Object>> partitions;
 
         @Schema(title = "Effective topic configuration", description = "For example `retention.ms`, `cleanup.policy`.")

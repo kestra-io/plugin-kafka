@@ -7,13 +7,20 @@ import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Inject;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.RecordsToDelete;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.TopicExistsException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -77,6 +84,10 @@ class TopicAdminTest {
         TopicDescribe.Output describeOutput = describe.run(runContext);
         assertThat(describeOutput.getPartitionCount(), is(3));
         assertThat(describeOutput.getPartitions(), hasSize(3));
+        assertThat(describeOutput.getPartitions(), everyItem(allOf(
+            not(hasKey("earliestOffset")),
+            not(hasKey("latestOffset"))
+        )));
 
         TopicCreatePartitions createPartitions = TopicCreatePartitions.builder()
             .properties(connection())
@@ -89,6 +100,65 @@ class TopicAdminTest {
         TopicDelete delete = TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build();
         TopicDelete.Output deleteOutput = delete.run(runContext);
         assertThat(deleteOutput.getDeletedTopics(), contains(topic));
+    }
+
+    @Test
+    void shouldIncludeEarliestAndLatestOffsetsWhenRequested() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String topic = "tu_admin_" + IdUtils.create();
+
+        TopicCreate.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .partitions(Property.ofValue(3))
+            .build()
+            .run(runContext);
+
+        try {
+            var producerProperties = new Properties();
+            producerProperties.put("bootstrap.servers", bootstrap);
+            producerProperties.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+            producerProperties.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+            try (var producer = new KafkaProducer<String, String>(producerProperties)) {
+                producer.send(new ProducerRecord<>(topic, 0, "key", "one")).get(10, TimeUnit.SECONDS);
+                producer.send(new ProducerRecord<>(topic, 0, "key", "two")).get(10, TimeUnit.SECONDS);
+                producer.send(new ProducerRecord<>(topic, 1, "key", "three")).get(10, TimeUnit.SECONDS);
+            }
+
+            // Advance the log start deterministically without waiting for retention's background scan.
+            try (var admin = AdminClient.create(Map.of("bootstrap.servers", bootstrap))) {
+                admin.deleteRecords(Map.of(new TopicPartition(topic, 0), RecordsToDelete.beforeOffset(1)))
+                    .all().get(10, TimeUnit.SECONDS);
+            }
+
+            TopicDescribe.Output output = TopicDescribe.builder()
+                .properties(connection())
+                .topic(Property.ofValue(topic))
+                .includeOffsets(Property.ofValue(true))
+                .build()
+                .run(runContext);
+
+            assertThat(output.getPartitions().stream()
+                .map(partition -> List.of(partition.get("partition"), partition.get("earliestOffset"), partition.get("latestOffset")))
+                .toList(), containsInAnyOrder(
+                List.of(0, 1L, 2L),
+                List.of(1, 0L, 1L),
+                List.of(2, 0L, 0L)
+            ));
+
+            var withoutOffsets = TopicDescribe.builder()
+                .properties(connection())
+                .topic(Property.ofValue(topic))
+                .includeOffsets(Property.ofValue(false))
+                .build()
+                .run(runContext);
+            assertThat(withoutOffsets.getPartitions(), everyItem(allOf(
+                hasKey("leader"), hasKey("replicas"), hasKey("isr"),
+                not(hasKey("earliestOffset")), not(hasKey("latestOffset"))
+            )));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
     }
 
     @Test
