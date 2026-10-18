@@ -183,6 +183,9 @@ class ConnectAdminTest {
             ConnectorPause.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build().run(runContext);
             waitForState(runContext, connectorName, "PAUSED");
 
+            ConnectorStop.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build().run(runContext);
+            waitForConnectorState(runContext, connectorName, "STOPPED", false);
+
             ConnectorResume.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build().run(runContext);
             waitForState(runContext, connectorName, "RUNNING");
 
