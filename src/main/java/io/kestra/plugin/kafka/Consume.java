@@ -787,7 +787,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     }
 
     @SuppressWarnings("RedundantIfStatement")
-    private boolean ended(RunContext runContext, Boolean empty, AtomicInteger count, ZonedDateTime start) throws IllegalVariableEvaluationException {
+    boolean ended(RunContext runContext, Boolean empty, AtomicInteger count, ZonedDateTime start) throws IllegalVariableEvaluationException {
         if (!isActive.get()) {
             return true;
         }
@@ -801,9 +801,16 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             return true;
         }
 
-        final Optional<Duration> renderedPollDuration = runContext.render(this.pollDuration).as(Duration.class);
-        if (renderedPollDuration.isPresent() && ZonedDateTime.now().toEpochSecond() > start.plus(renderedPollDuration.get()).toEpochSecond()) {
+        final Optional<Duration> renderedMaxDuration = runContext.render(this.maxDuration).as(Duration.class);
+        if (renderedMaxDuration.isPresent() && ZonedDateTime.now().toEpochSecond() > start.plus(renderedMaxDuration.get()).toEpochSecond()) {
             return true;
+        }
+
+        if (renderedMaxDuration.isEmpty()) {
+            final Optional<Duration> renderedPollDuration = runContext.render(this.pollDuration).as(Duration.class);
+            if (renderedPollDuration.isPresent() && ZonedDateTime.now().toEpochSecond() > start.plus(renderedPollDuration.get()).toEpochSecond()) {
+                return true;
+            }
         }
 
         return false;
