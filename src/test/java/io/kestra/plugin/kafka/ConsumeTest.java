@@ -192,7 +192,7 @@ class ConsumeTest {
 
             produceRecords(topic, 1);
 
-            int received = 0;
+            var received = 0;
             var deadline = System.currentTimeMillis() + 15_000;
             while (received == 0 && System.currentTimeMillis() < deadline) {
                 received += consumer.poll(Duration.ofSeconds(1)).count();
@@ -251,7 +251,7 @@ class ConsumeTest {
         assertThat(content, Matchers.containsString(matching2));
         assertThat(content, Matchers.not(Matchers.containsString(other)));
 
-        try (AdminClient adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, this.bootstrap))) {
+        try (var adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, this.bootstrap))) {
             for (var group : adminClient.listConsumerGroups().all().get(15, TimeUnit.SECONDS)) {
                 var offsets = adminClient.listConsumerGroupOffsets(group.groupId())
                     .partitionsToOffsetAndMetadata()
