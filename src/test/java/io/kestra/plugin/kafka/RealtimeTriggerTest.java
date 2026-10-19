@@ -391,6 +391,54 @@ class RealtimeTriggerTest {
         }
     }
 
+    @Test
+    void shouldReceiveRecordsGivenPatternAndNoGroupId() throws Exception {
+        var prefix = "tu_rt_pattern_" + IdUtils.create();
+        var topic = prefix + "_a";
+        var produceTask = Produce.builder()
+            .id(IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(List.of(
+                ImmutableMap.of("key", "key1", "value", "value1"),
+                ImmutableMap.of("key", "key2", "value", "value2")
+            ))
+            .build();
+        produceTask.run(runContextFactory.of(Map.of()));
+
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .topicPattern(Property.ofValue(prefix + "_.*"))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .build();
+
+        var received = new CopyOnWriteArrayList<ConsumerRecord<Object, Object>>();
+        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = trigger.consumeTask();
+
+        Flux.from(trigger.publisher(task, runContext))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(received::add, failure::set);
+
+        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+        while (received.size() < 2 && failure.get() == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(200);
+        }
+        // let at least one more poll loop run so a commitSync failure would surface
+        Thread.sleep(1500);
+        trigger.stop();
+
+        assertThat("No error expected without a group id", failure.get(), is(nullValue()));
+        assertThat(received.size(), is(2));
+    }
+
     void produce() throws Exception {
         Produce task = Produce.builder()
             .id(RealtimeTriggerTest.class.getSimpleName())

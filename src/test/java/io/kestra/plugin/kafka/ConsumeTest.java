@@ -76,15 +76,95 @@ class ConsumeTest {
     }
 
     @Test
-    void shouldThrowIllegalGivenPatternAndNoGroupId() {
+    void shouldGetTopicPartitionSubscriptionGivenPatternAndNoGroupId() throws IllegalVariableEvaluationException {
         // Given
         RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
-            .topicPattern(Property.ofValue(".*"))
+            .topicPattern(Property.ofValue("orders-.*"))
             .build();
-        // When/Then
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+        consumer.updatePartitions("orders-eu", List.of(new PartitionInfo("orders-eu", 0, null, null, null)));
+        consumer.updatePartitions("payments", List.of(new PartitionInfo("payments", 0, null, null, null)));
+
+        // When
+        Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
+        subscription.subscribe(runContext, consumer, task);
+
+        // Then
+        Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
+        Assertions.assertEquals(List.of(new TopicPartition("orders-eu", 0)), ((Consume.TopicPartitionsSubscription) subscription).topicPartitions());
+    }
+
+    @Test
+    void shouldAssignNothingGivenPatternMatchingNoTopic() throws IllegalVariableEvaluationException {
+        // Given
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume
+            .builder()
+            .topicPattern(Property.ofValue("nomatch-.*"))
+            .build();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+
+        // When
+        Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
+        subscription.subscribe(runContext, consumer, task);
+
+        // Then
+        Assertions.assertTrue(consumer.assignment().isEmpty());
+    }
+
+    @Test
+    void shouldThrowGivenInvalidPatternAndNoGroupId() {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder().topicPattern(Property.ofValue("[")).build();
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
+    }
+
+    @Test
+    void shouldConsumeMatchingTopicsGivenPatternAndNoGroupId() throws Exception {
+        var prefix = "tu_pattern_" + IdUtils.create();
+        var matching1 = prefix + "_a";
+        var matching2 = prefix + "_b";
+        var other = "tu_other_" + IdUtils.create();
+        produceRecords(matching1, 2);
+        produceRecords(matching2, 2);
+        produceRecords(other, 2);
+
+        Consume task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topicPattern(Property.ofValue(prefix + "_.*"))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .build();
+
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume.Output output = task.run(runContext);
+
+        assertThat(output.getMessagesCount(), is(4));
+        String content;
+        try (var in = runContext.storage().getFile(output.getUri())) {
+            content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertThat(content, Matchers.containsString(matching1));
+        assertThat(content, Matchers.containsString(matching2));
+        assertThat(content, Matchers.not(Matchers.containsString(other)));
+
+        try (AdminClient adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, this.bootstrap))) {
+            for (var group : adminClient.listConsumerGroups().all().get(15, TimeUnit.SECONDS)) {
+                var offsets = adminClient.listConsumerGroupOffsets(group.groupId())
+                    .partitionsToOffsetAndMetadata()
+                    .get(15, TimeUnit.SECONDS);
+                assertThat(
+                    "No offsets must be committed when no group is configured",
+                    offsets.keySet().stream().noneMatch(tp -> tp.topic().startsWith(prefix)),
+                    is(true)
+                );
+            }
+        }
     }
 
     @Test

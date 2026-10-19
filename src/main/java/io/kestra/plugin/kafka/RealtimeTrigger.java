@@ -15,7 +15,6 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.consumer.Consumer;
@@ -47,6 +46,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Consumes Kafka messages as they arrive and starts one Execution per record.
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits (auto-commit disabled) and STRING deserializers by default.
         Configure `groupId`, `serdeProperties`, or `since` to control offsets and schema handling.
+        Without `groupId`, partitions are assigned manually and no offsets are committed.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
         Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
@@ -155,7 +155,6 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     private Property<String> topicPattern;
 
-    @NotNull
     private Property<String> groupId;
 
     @Schema(
@@ -335,11 +334,15 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             );
 
             boolean deduplicate = runContext.render(task.getDeduplicate()).as(Boolean.class).orElse(false);
+            // consumer() copies `group.id` from properties into the task's groupId; commitSync() fails without a group
+            boolean hasGroupId = runContext.render(task.getGroupId()).as(String.class).isPresent();
             Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);
                 task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next);
-                consumer.commitSync();
+                if (hasGroupId) {
+                    consumer.commitSync();
+                }
             });
         }
     }

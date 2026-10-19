@@ -168,6 +168,24 @@ import java.util.stream.StreamSupport;
         ),
         @Example(
             full = true,
+            title = "Consume from topics matching a regex without a consumer group; no offsets are committed",
+            code = """
+                id: consume_pattern_no_group
+                namespace: company.team
+
+                tasks:
+                  - id: consume
+                    type: io.kestra.plugin.kafka.Consume
+                    topicPattern: "orders-.*"
+                    since: "{{ now() }}"
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    keyDeserializer: STRING
+                    valueDeserializer: STRING
+                """
+        ),
+        @Example(
+            full = true,
             title = "Consume records with deduplication enabled",
             code = """
                 id: consume_deduplicated
@@ -873,7 +891,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         final Optional<String> renderedPattern = runContext.render(topicPattern).as(String.class);
         if (renderedPattern.isPresent()) {
             try {
-                return new TopicPatternSubscription(renderedGroupId.orElse(null), Pattern.compile(renderedPattern.get()));
+                final Pattern compiled = Pattern.compile(renderedPattern.get());
+                if (renderedGroupId.isEmpty()) {
+                    return TopicPartitionsSubscription.forPattern(compiled, evaluateSince(runContext));
+                }
+                return new TopicPatternSubscription(renderedGroupId.get(), compiled);
             } catch (PatternSyntaxException e) {
                 throw new IllegalArgumentException("Invalid regex for `topicPattern`: " + renderedPattern.get());
             }
@@ -931,12 +953,6 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         if (this.topic != null && this.topicPattern != null) {
             throw new IllegalArgumentException(
                 "Invalid Configuration: Both `topic` and `topicPattern` was configured. You must configure only one of the following two settings: `topic` or `topicPattern`."
-            );
-        }
-
-        if (this.topicPattern != null && this.groupId == null) {
-            throw new IllegalArgumentException(
-                "Invalid Configuration: `groupId` cannot be null when `topicPattern` is configured."
             );
         }
     }
@@ -1042,8 +1058,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     static final class TopicPartitionsSubscription implements ConsumerSubscription {
 
         @PluginProperty(group = "advanced")
+        private static final Set<String> INTERNAL_TOPICS = Set.of("__consumer_offsets", "__transaction_state");
+
         private final String groupId;
         private final List<String> topics;
+        private final Pattern pattern;
         private final Long fromTimestamp;
         private List<TopicPartition> topicPartitions;
 
@@ -1054,6 +1073,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 groupId,
                 topicPartitions,
                 topicPartitions.stream().map(TopicPartition::topic).toList(),
+                null,
                 fromTimestamp
             );
         }
@@ -1061,16 +1081,22 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         public static TopicPartitionsSubscription forTopics(final String groupId,
                                                             final List<String> topics,
                                                             final Long fromTimestamp) {
-            return new TopicPartitionsSubscription(groupId, null, topics, fromTimestamp);
+            return new TopicPartitionsSubscription(groupId, null, topics, null, fromTimestamp);
+        }
+
+        public static TopicPartitionsSubscription forPattern(final Pattern pattern, final Long fromTimestamp) {
+            return new TopicPartitionsSubscription(null, null, null, pattern, fromTimestamp);
         }
 
         TopicPartitionsSubscription(final String groupId,
                                     final List<TopicPartition> topicPartitions,
                                     final List<String> topics,
+                                    final Pattern pattern,
                                     Long fromTimestamp) {
             this.groupId = groupId;
             this.topicPartitions = topicPartitions;
             this.topics = topics;
+            this.pattern = pattern;
             this.fromTimestamp = fromTimestamp;
         }
 
@@ -1083,7 +1109,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         public void subscribe(RunContext runContext, final Consumer<Object, Object> consumer,
                               final ConsumeInterface consumeInterface, final ConsumerRebalanceListener rebalanceListener) {
             if (this.topicPartitions == null) {
-                this.topicPartitions = allPartitionsForTopics(consumer, topics);
+                this.topicPartitions = allPartitionsForTopics(consumer, resolveTopics(runContext, consumer));
             }
 
             consumer.assign(this.topicPartitions);
@@ -1123,6 +1149,23 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             return topicPartitions;
         }
 
+        // Resolved once: topics created after subscribe time are not picked up in manual-assign mode.
+        private List<String> resolveTopics(final RunContext runContext, final Consumer<?, ?> consumer) {
+            if (pattern == null) {
+                return topics;
+            }
+
+            var matched = consumer.listTopics().keySet().stream()
+                .filter(t -> !INTERNAL_TOPICS.contains(t))
+                .filter(t -> pattern.matcher(t).matches())
+                .sorted()
+                .toList();
+            if (matched.isEmpty()) {
+                runContext.logger().warn("No topic matches `topicPattern` '{}'; nothing will be consumed", pattern);
+            }
+            return matched;
+        }
+
         private List<TopicPartition> allPartitionsForTopics(final Consumer<?, ?> consumer, final List<String> topics) {
             return topics
                 .stream()
@@ -1133,7 +1176,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         @Override
         public String toString() {
-            return "[Subscription topics=" + topics + ", groupId=" + groupId + "]";
+            return "[Subscription " + (pattern != null ? "pattern=" + pattern : "topics=" + topics) + ", groupId=" + groupId + "]";
         }
     }
 }
