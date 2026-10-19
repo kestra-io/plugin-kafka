@@ -26,7 +26,7 @@ public abstract class KafkaTraceContextExtractor {
         String bodyExtractorPath,
         Logger logger
     ) {
-        String traceParentFromHeaders = extractFromHeaders(record, message, traceparentHeaderKey, logger);
+        var traceParentFromHeaders = extractFromHeaders(record, message, traceparentHeaderKey, logger);
         if (traceParentFromHeaders != null) {
             return traceParentFromHeaders;
         }
@@ -44,20 +44,20 @@ public abstract class KafkaTraceContextExtractor {
         String headerKey,
         Logger logger
     ) {
-        String key = (headerKey != null && !headerKey.isBlank()) ? headerKey : "traceparent";
+        var key = (headerKey != null && !headerKey.isBlank()) ? headerKey : "traceparent";
 
         if (record != null && record.headers() != null) {
-            Header header = record.headers().lastHeader(key);
+            var header = record.headers().lastHeader(key);
             if (header != null && header.value() != null) {
-                String candidate = new String(header.value(), StandardCharsets.UTF_8).trim();
+                var candidate = new String(header.value(), StandardCharsets.UTF_8).trim();
                 return validateAndReturn(candidate, "Kafka header '" + key + "'", logger);
             }
         }
 
         if (message != null && message.getHeaders() != null) {
-            List<Pair<String, String>> headers = message.getHeaders();
+            var headers = message.getHeaders();
             for (int i = headers.size() - 1; i >= 0; i--) {
-                Pair<String, String> pair = headers.get(i);
+                var pair = headers.get(i);
                 if (key.equalsIgnoreCase(pair.getKey()) && pair.getValue() != null) {
                     return validateAndReturn(pair.getValue().trim(), "Message header '" + key + "'", logger);
                 }
@@ -73,7 +73,7 @@ public abstract class KafkaTraceContextExtractor {
         String path,
         Logger logger
     ) {
-        Object body = (message != null && message.getValue() != null) ? message.getValue() : (record != null ? record.value() : null);
+        var body = (message != null && message.getValue() != null) ? message.getValue() : (record != null ? record.value() : null);
         if (body == null) {
             if (logger != null && logger.isDebugEnabled()) {
                 logger.debug("Cannot extract trace context from empty message body for path '{}'", path);
@@ -86,14 +86,14 @@ public abstract class KafkaTraceContextExtractor {
             if (body instanceof Map<?, ?> mapBody) {
                 map = mapBody;
             } else if (body instanceof String strBody) {
-                String trimmed = strBody.trim();
+                var trimmed = strBody.trim();
                 if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
                     map = JacksonMapper.ofJson().readValue(trimmed, new TypeReference<Map<String, Object>>() {});
                 }
             }
 
             if (map != null) {
-                Object extracted = findNestedValue(map, path);
+                var extracted = findNestedValue(map, path);
                 if (extracted != null) {
                     return validateAndReturn(extracted.toString().trim(), "body path '" + path + "'", logger);
                 }
@@ -108,9 +108,9 @@ public abstract class KafkaTraceContextExtractor {
     }
 
     private static Object findNestedValue(Map<?, ?> map, String path) {
-        String[] parts = path.split("\\.");
+        var parts = path.split("\\.");
         Object current = map;
-        for (String part : parts) {
+        for (var part : parts) {
             if (current instanceof Map<?, ?> currentMap) {
                 current = currentMap.get(part);
             } else {
@@ -128,9 +128,9 @@ public abstract class KafkaTraceContextExtractor {
         if (!matcher.matches()) {
             return false;
         }
-        String version = matcher.group(1);
-        String traceId = matcher.group(2);
-        String parentId = matcher.group(3);
+        var version = matcher.group(1);
+        var traceId = matcher.group(2);
+        var parentId = matcher.group(3);
 
         if ("ff".equalsIgnoreCase(version)) {
             return false;

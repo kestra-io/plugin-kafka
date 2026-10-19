@@ -4,6 +4,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
@@ -15,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaTraceContextExtractorTest {
     private static final String VALID_TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-    private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(KafkaTraceContextExtractorTest.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(KafkaTraceContextExtractorTest.class);
 
     @Test
     @DisplayName("Should validate valid W3C traceparent correctly")
@@ -30,13 +31,9 @@ class KafkaTraceContextExtractorTest {
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent(null));
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent(""));
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent("invalid"));
-        // Version ff is invalid
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent("ff-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"));
-        // Trace-id all zeros is invalid
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent("00-00000000000000000000000000000000-00f067aa0ba902b7-01"));
-        // Parent-id all zeros is invalid
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-0000000000000000-01"));
-        // Bad segment length
         assertFalse(KafkaTraceContextExtractor.isValidTraceParent("00-4bf92f3577b34da6a3ce929d0e0e473-00f067aa0ba902b7-01"));
     }
 
@@ -48,7 +45,7 @@ class KafkaTraceContextExtractorTest {
         var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", "value");
         headers.forEach(h -> record.headers().add(h));
 
-        String extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
+        var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
         assertThat(extracted, is(VALID_TRACEPARENT));
     }
 
@@ -60,7 +57,7 @@ class KafkaTraceContextExtractorTest {
         var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", "value");
         headers.forEach(h -> record.headers().add(h));
 
-        String extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "custom-trace-id", null, LOGGER);
+        var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "custom-trace-id", null, LOGGER);
         assertThat(extracted, is(VALID_TRACEPARENT));
     }
 
@@ -72,7 +69,7 @@ class KafkaTraceContextExtractorTest {
         var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", "value");
         headers.forEach(h -> record.headers().add(h));
 
-        String extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
+        var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
         assertNull(extracted);
     }
 
@@ -83,17 +80,17 @@ class KafkaTraceContextExtractorTest {
             "trace", Map.of("parent", VALID_TRACEPARENT)
         ));
 
-        String extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", "trace.parent", LOGGER);
+        var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", "trace.parent", LOGGER);
         assertThat(extracted, is(VALID_TRACEPARENT));
     }
 
     @Test
     @DisplayName("Should extract traceparent from JSON String body when bodyExtractor is set")
     void shouldExtractFromJsonStringBody() {
-        String json = "{\"traceparent\": \"" + VALID_TRACEPARENT + "\", \"user\": \"test\"}";
+        var json = "{\"traceparent\": \"" + VALID_TRACEPARENT + "\", \"user\": \"test\"}";
         var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", json);
 
-        String extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", "traceparent", LOGGER);
+        var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", "traceparent", LOGGER);
         assertThat(extracted, is(VALID_TRACEPARENT));
     }
 
@@ -101,7 +98,7 @@ class KafkaTraceContextExtractorTest {
     @DisplayName("Should return null if neither headers nor body contain trace context")
     void shouldReturnNullWhenMissing() {
         var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", "hello world");
-        String extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
+        var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
         assertNull(extracted);
     }
 }

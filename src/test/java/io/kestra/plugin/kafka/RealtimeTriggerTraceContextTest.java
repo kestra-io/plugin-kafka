@@ -8,6 +8,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.models.TraceContext;
 import jakarta.inject.Inject;
 import lombok.EqualsAndHashCode;
@@ -54,9 +55,9 @@ class RealtimeTriggerTraceContextTest {
     @Test
     @DisplayName("Should not extract or propagate trace context when disabled by default")
     void shouldNotPropagateWhenDisabled() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        RealtimeTrigger trigger = RealtimeTrigger.builder()
-            .id("trigger-default")
+        var runContext = runContextFactory.of(Map.of());
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
             .type(RealtimeTrigger.class.getName())
             .topic("test-topic")
             .build();
@@ -65,9 +66,9 @@ class RealtimeTriggerTraceContextTest {
         headers.add("traceparent", VALID_TRACEPARENT.getBytes(StandardCharsets.UTF_8));
         var record = new ConsumerRecord<Object, Object>("test-topic", 0, 1L, "key", "val");
         headers.forEach(h -> record.headers().add(h));
-        Message message = Message.builder().headers(Consume.processHeaders(record.headers())).build();
+        var message = Message.builder().headers(Consume.processHeaders(record.headers())).build();
 
-        Execution execution = Execution.builder().id("exec-1").build();
+        var execution = Execution.builder().id(IdUtils.create()).build();
         trigger.propagateTraceContext(runContext, record, message, execution);
 
         assertNull(execution.getTraceParent());
@@ -76,9 +77,9 @@ class RealtimeTriggerTraceContextTest {
     @Test
     @DisplayName("Should extract and propagate valid traceparent when enabled")
     void shouldPropagateWhenEnabled() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        RealtimeTrigger trigger = RealtimeTrigger.builder()
-            .id("trigger-enabled")
+        var runContext = runContextFactory.of(Map.of());
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
             .type(RealtimeTrigger.class.getName())
             .topic("test-topic")
             .traceContext(TraceContext.builder()
@@ -90,9 +91,9 @@ class RealtimeTriggerTraceContextTest {
         headers.add("traceparent", VALID_TRACEPARENT.getBytes(StandardCharsets.UTF_8));
         var record = new ConsumerRecord<Object, Object>("test-topic", 0, 1L, "key", "val");
         headers.forEach(h -> record.headers().add(h));
-        Message message = Message.builder().headers(Consume.processHeaders(record.headers())).build();
+        var message = Message.builder().headers(Consume.processHeaders(record.headers())).build();
 
-        Execution execution = Execution.builder().id("exec-2").build();
+        var execution = Execution.builder().id(IdUtils.create()).build();
         trigger.propagateTraceContext(runContext, record, message, execution);
 
         assertThat(execution.getTraceParent(), is(VALID_TRACEPARENT));
@@ -101,9 +102,9 @@ class RealtimeTriggerTraceContextTest {
     @Test
     @DisplayName("Should not fail execution when header has malformed traceparent")
     void shouldHandleMalformedGracefully() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        RealtimeTrigger trigger = RealtimeTrigger.builder()
-            .id("trigger-malformed")
+        var runContext = runContextFactory.of(Map.of());
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
             .type(RealtimeTrigger.class.getName())
             .topic("test-topic")
             .traceContext(TraceContext.builder()
@@ -115,9 +116,9 @@ class RealtimeTriggerTraceContextTest {
         headers.add("traceparent", "malformed-value".getBytes(StandardCharsets.UTF_8));
         var record = new ConsumerRecord<Object, Object>("test-topic", 0, 1L, "key", "val");
         headers.forEach(h -> record.headers().add(h));
-        Message message = Message.builder().headers(Consume.processHeaders(record.headers())).build();
+        var message = Message.builder().headers(Consume.processHeaders(record.headers())).build();
 
-        Execution execution = Execution.builder().id("exec-3").build();
+        var execution = Execution.builder().id(IdUtils.create()).build();
         trigger.propagateTraceContext(runContext, record, message, execution);
 
         assertNull(execution.getTraceParent());
@@ -126,9 +127,9 @@ class RealtimeTriggerTraceContextTest {
     @Test
     @DisplayName("Should extract traceparent from message body when bodyExtractor is configured")
     void shouldExtractFromBodyWhenConfigured() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        RealtimeTrigger trigger = RealtimeTrigger.builder()
-            .id("trigger-body")
+        var runContext = runContextFactory.of(Map.of());
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
             .type(RealtimeTrigger.class.getName())
             .topic("test-topic")
             .traceContext(TraceContext.builder()
@@ -137,11 +138,11 @@ class RealtimeTriggerTraceContextTest {
                 .build())
             .build();
 
-        Map<String, Object> bodyMap = Map.of("trace", Map.of("parent", VALID_TRACEPARENT));
+        var bodyMap = Map.<String, Object>of("trace", Map.of("parent", VALID_TRACEPARENT));
         var record = new ConsumerRecord<Object, Object>("test-topic", 0, 1L, "key", bodyMap);
-        Message message = Message.builder().value(bodyMap).build();
+        var message = Message.builder().value(bodyMap).build();
 
-        Execution execution = Execution.builder().id("exec-4").build();
+        var execution = Execution.builder().id(IdUtils.create()).build();
         trigger.propagateTraceContext(runContext, record, message, execution);
 
         assertThat(execution.getTraceParent(), is(VALID_TRACEPARENT));
@@ -150,20 +151,20 @@ class RealtimeTriggerTraceContextTest {
     @Test
     @DisplayName("Should extract and propagate traceparent when evaluated through trigger.evaluate()")
     void shouldPropagateThroughEvaluateWhenEnabled() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Flow flow = Flow.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var flow = Flow.builder()
             .namespace("io.kestra.tests")
             .id("realtime_flow")
             .revision(1)
             .build();
-        ConditionContext conditionContext = ConditionContext.builder()
+        var conditionContext = ConditionContext.builder()
             .runContext(runContext)
             .flow(flow)
             .build();
-        TriggerContext triggerContext = TriggerContext.builder()
+        var triggerContext = TriggerContext.builder()
             .namespace("io.kestra.tests")
             .flowId("realtime_flow")
-            .triggerId("realtime_trigger")
+            .triggerId(IdUtils.create())
             .date(ZonedDateTime.now())
             .build();
 
@@ -172,8 +173,8 @@ class RealtimeTriggerTraceContextTest {
         var record = new ConsumerRecord<Object, Object>("test-topic", 0, 1L, "key", "val");
         headers.forEach(h -> record.headers().add(h));
 
-        TestableRealtimeTrigger trigger = TestableRealtimeTrigger.builder()
-            .id("trigger-evaluate-enabled")
+        var trigger = TestableRealtimeTrigger.builder()
+            .id(IdUtils.create())
             .type(RealtimeTrigger.class.getName())
             .topic("test-topic")
             .traceContext(TraceContext.builder()
@@ -182,7 +183,7 @@ class RealtimeTriggerTraceContextTest {
             .recordToEmit(record)
             .build();
 
-        Execution execution = Flux.from(trigger.evaluate(conditionContext, triggerContext)).blockFirst();
+        var execution = Flux.from(trigger.evaluate(conditionContext, triggerContext)).blockFirst();
 
         assertThat(execution, notNullValue());
         assertThat(execution.getTraceParent(), is(VALID_TRACEPARENT));
@@ -191,20 +192,20 @@ class RealtimeTriggerTraceContextTest {
     @Test
     @DisplayName("Should not propagate traceparent through evaluate() when traceContext is disabled")
     void shouldNotPropagateThroughEvaluateWhenDisabled() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Flow flow = Flow.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var flow = Flow.builder()
             .namespace("io.kestra.tests")
             .id("realtime_flow")
             .revision(1)
             .build();
-        ConditionContext conditionContext = ConditionContext.builder()
+        var conditionContext = ConditionContext.builder()
             .runContext(runContext)
             .flow(flow)
             .build();
-        TriggerContext triggerContext = TriggerContext.builder()
+        var triggerContext = TriggerContext.builder()
             .namespace("io.kestra.tests")
             .flowId("realtime_flow")
-            .triggerId("realtime_trigger")
+            .triggerId(IdUtils.create())
             .date(ZonedDateTime.now())
             .build();
 
@@ -213,14 +214,14 @@ class RealtimeTriggerTraceContextTest {
         var record = new ConsumerRecord<Object, Object>("test-topic", 0, 1L, "key", "val");
         headers.forEach(h -> record.headers().add(h));
 
-        TestableRealtimeTrigger trigger = TestableRealtimeTrigger.builder()
-            .id("trigger-evaluate-disabled")
+        var trigger = TestableRealtimeTrigger.builder()
+            .id(IdUtils.create())
             .type(RealtimeTrigger.class.getName())
             .topic("test-topic")
             .recordToEmit(record)
             .build();
 
-        Execution execution = Flux.from(trigger.evaluate(conditionContext, triggerContext)).blockFirst();
+        var execution = Flux.from(trigger.evaluate(conditionContext, triggerContext)).blockFirst();
 
         assertThat(execution, notNullValue());
         assertNull(execution.getTraceParent());

@@ -259,7 +259,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Schema(
         title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution",
-        description = "Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update."
+        description = """
+            Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update.
+            """
     )
     @PluginProperty(group = "advanced")
     private TraceContext traceContext;
@@ -288,14 +290,14 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Override
     public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) {
-        RunContext runContext = conditionContext.getRunContext();
+        var runContext = conditionContext.getRunContext();
 
-        Consume task = consumeTask();
+        var task = consumeTask();
 
         return Flux.from(publisher(task, runContext))
             .map((record) -> {
-                Message message = task.recordToMessage(record);
-                Execution execution = TriggerService.generateRealtimeExecution(this, conditionContext, context, message);
+                var message = task.recordToMessage(record);
+                var execution = TriggerService.generateRealtimeExecution(this, conditionContext, context, message);
                 propagateTraceContext(runContext, record, message, execution);
                 return execution;
             });
@@ -310,24 +312,24 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         }
 
         try {
-            boolean enabled = this.traceContext.getEnabled() != null && runContext.render(this.traceContext.getEnabled()).as(Boolean.class).orElse(false);
-            if (!enabled) {
+            var rEnabled = this.traceContext.getEnabled() != null && runContext.render(this.traceContext.getEnabled()).as(Boolean.class).orElse(false);
+            if (!rEnabled) {
                 return;
             }
 
-            String traceparentHeaderKey = this.traceContext.getTraceparentHeader() != null
+            var rTraceparentHeader = this.traceContext.getTraceparentHeader() != null
                 ? runContext.render(this.traceContext.getTraceparentHeader()).as(String.class).orElse("traceparent")
                 : "traceparent";
 
-            String bodyExtractorPath = this.traceContext.getBodyExtractor() != null
+            var rBodyExtractor = this.traceContext.getBodyExtractor() != null
                 ? runContext.render(this.traceContext.getBodyExtractor()).as(String.class).orElse(null)
                 : null;
 
-            String traceParent = KafkaTraceContextExtractor.extractTraceParent(
+            var traceParent = KafkaTraceContextExtractor.extractTraceParent(
                 record,
                 message,
-                traceparentHeaderKey,
-                bodyExtractorPath,
+                rTraceparentHeader,
+                rBodyExtractor,
                 runContext.logger()
             );
 
