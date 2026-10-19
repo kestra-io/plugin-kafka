@@ -333,6 +333,20 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 this.partitions
             );
 
+            if (subscription.hasNothingToConsume()) {
+                // poll() throws on an empty assignment, which would fail and restart the trigger in a loop.
+                // Idle until stopped instead; the matching topics are resolved once, so a restart is needed to pick up new ones.
+                logger.warn("Kafka trigger triggerId={} has no topic to consume (no topic matches `topicPattern`); idling until stopped", this.id);
+                runPollingLoop(() -> {
+                    try {
+                        Thread.sleep(POLL_DURATION.toMillis());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+                return;
+            }
+
             boolean deduplicate = runContext.render(task.getDeduplicate()).as(Boolean.class).orElse(false);
             // consumer() copies `group.id` from properties into the task's groupId; commitSync() fails without a group
             boolean hasGroupId = runContext.render(task.getGroupId()).as(String.class).isPresent();

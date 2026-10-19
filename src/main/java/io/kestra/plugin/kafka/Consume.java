@@ -587,7 +587,10 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                             // consumer is published above (isActive is already false, but wakeup()
                             // had no consumer to target): check isActive before every poll(), including
                             // the first, instead of relying solely on ended()'s post-poll check.
-                            if (!isActive.get()) {
+                            // Also skip when a manual assignment resolved to zero partitions (e.g. a
+                            // `topicPattern` matching nothing): poll() throws IllegalStateException on an
+                            // empty assignment, and there is nothing to read anyway.
+                            if (!isActive.get() || this.subscription.hasNothingToConsume()) {
                                 break;
                             }
                             records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
@@ -992,6 +995,13 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             subscribe(runContext, consumer, consumeInterface);
         }
 
+        /**
+         * True when the subscription resolved to an empty manual assignment, so polling must be skipped.
+         */
+        default boolean hasNothingToConsume() {
+            return false;
+        }
+
         default void waitForSubscription(RunContext runContext,
                                          final Consumer<Object, Object> consumer,
                                          final ConsumeInterface consumeInterface) throws IllegalVariableEvaluationException {
@@ -1127,11 +1137,25 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .stream()
                 .collect(Collectors.toMap(Function.identity(), tp -> fromTimestamp));
 
-            consumer
-                .offsetsForTimes(topicPartitionsTimestamp)
-                .forEach((tp, offsetAndTimestamp) ->
-                    consumer.seek(tp, offsetAndTimestamp.timestamp())
-                );
+            var offsets = consumer.offsetsForTimes(topicPartitionsTimestamp);
+            // offsetsForTimes maps a partition to null when it has no record at or after the timestamp
+            // (e.g. `since: "{{ now() }}"`): start from the end so only new records are read.
+            var withoutRecord = this.topicPartitions.stream()
+                .filter(tp -> offsets.get(tp) == null)
+                .toList();
+            offsets.forEach((tp, offsetAndTimestamp) -> {
+                if (offsetAndTimestamp != null) {
+                    consumer.seek(tp, offsetAndTimestamp.offset());
+                }
+            });
+            if (!withoutRecord.isEmpty()) {
+                consumer.endOffsets(withoutRecord).forEach(consumer::seek);
+            }
+        }
+
+        @Override
+        public boolean hasNothingToConsume() {
+            return this.topicPartitions != null && this.topicPartitions.isEmpty();
         }
 
         @VisibleForTesting

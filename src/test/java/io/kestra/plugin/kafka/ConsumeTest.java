@@ -115,6 +115,93 @@ class ConsumeTest {
     }
 
     @Test
+    void shouldHaveNothingToConsumeGivenPatternMatchingNoTopic() throws IllegalVariableEvaluationException {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder().topicPattern(Property.ofValue("nomatch-.*")).build();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+
+        Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
+        subscription.subscribe(runContext, consumer, task);
+
+        Assertions.assertTrue(subscription.hasNothingToConsume());
+    }
+
+    @Test
+    void shouldReturnZeroMessagesGivenPatternMatchingNoTopic() throws Exception {
+        Consume task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topicPattern(Property.ofValue("tu_nomatch_" + IdUtils.create() + "_.*"))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+            .build();
+
+        Consume.Output output = task.run(runContextFactory.of(Map.of()));
+
+        assertThat(output.getMessagesCount(), is(0));
+    }
+
+    @Test
+    void shouldReturnZeroMessagesGivenSinceAfterAllRecords() throws Exception {
+        var topic = "tu_since_future_" + IdUtils.create();
+        produceRecords(topic, 2);
+
+        for (var usePattern : List.of(false, true)) {
+            var builder = Consume.builder()
+                .id(IdUtils.create())
+                .type(Consume.class.getName())
+                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+                .keyDeserializer(Property.ofValue(SerdeType.STRING))
+                .valueDeserializer(Property.ofValue(SerdeType.STRING))
+                .since(Property.ofValue(Instant.now().plusSeconds(60).toString()))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(2)));
+            if (usePattern) {
+                builder.topicPattern(Property.ofValue(topic));
+            } else {
+                builder.topic(topic);
+            }
+
+            Consume.Output output = builder.build().run(runContextFactory.of(Map.of()));
+
+            assertThat("usePattern=" + usePattern, output.getMessagesCount(), is(0));
+        }
+    }
+
+    @Test
+    void shouldPickUpRecordProducedAfterSubscribeGivenSinceAfterAllRecords() throws Exception {
+        var topic = "tu_since_new_" + IdUtils.create();
+        produceRecords(topic, 2);
+
+        Consume task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topicPattern(Property.ofValue(topic))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .since(Property.ofValue(Instant.now().plusSeconds(60).toString()))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+            .build();
+        RunContext runContext = runContextFactory.of(Map.of());
+
+        try (var consumer = task.consumer(runContext)) {
+            task.topicSubscription(runContext).subscribe(runContext, consumer, task);
+            assertThat(consumer.poll(Duration.ofSeconds(2)).count(), is(0));
+
+            produceRecords(topic, 1);
+
+            int received = 0;
+            var deadline = System.currentTimeMillis() + 15_000;
+            while (received == 0 && System.currentTimeMillis() < deadline) {
+                received += consumer.poll(Duration.ofSeconds(1)).count();
+            }
+            assertThat(received, is(1));
+        }
+    }
+
+    @Test
     void shouldThrowGivenInvalidPatternAndNoGroupId() {
         RunContext runContext = runContextFactory.of(Map.of());
         Consume task = Consume.builder().topicPattern(Property.ofValue("[")).build();
