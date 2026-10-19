@@ -47,7 +47,8 @@ import java.util.concurrent.atomic.AtomicReference;
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits (auto-commit disabled) and STRING deserializers by default.
         Configure `groupId`, `serdeProperties`, or `since` to control offsets and schema handling.
         Without `groupId`, partitions are assigned manually and no offsets are committed: every restart (worker restart, flow update) reads from the beginning again and starts one Execution per old record.
-        Set `since` (e.g. `"{{ now() }}"`) to read only new records when no `groupId` is used.
+        `groupId` is required for a plain `topic`, unless `topicPattern` or `since` is set.
+        Set `since` (e.g. `"{{ now() }}"`) to read only new records when no `groupId` is used. `since` is rendered again at every trigger start, so with `"{{ now() }}"` records produced while the trigger was down (restart, flow update, deploy) are skipped. Use `groupId` if no record can be lost.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
         Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
@@ -138,7 +139,7 @@ import java.util.concurrent.atomic.AtomicReference;
         ),
         @Example(
             full = true,
-            title = "Read only new records without a consumer group, so a restart does not replay the topic",
+            title = "Read only new records without a consumer group (records produced while the trigger is down are skipped, use `groupId` to avoid losing them)",
             code = """
                 id: kafka_realtime_no_group
                 namespace: company.team
@@ -326,6 +327,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                                  RunContext runContext,
                                  FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
         Logger logger = runContext.logger();
+        validateGroupId(runContext);
         try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
             this.consumer.set(consumer);
             logger.debug("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
@@ -379,6 +381,16 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                     consumer.commitSync();
                 }
             });
+        }
+    }
+
+    // a plain `topic` without `groupId` or `since` would replay the whole topic at every restart
+    private void validateGroupId(RunContext runContext) throws Exception {
+        var hasGroupId = runContext.render(this.groupId).as(String.class).isPresent();
+        var hasTopicPattern = runContext.render(this.topicPattern).as(String.class).isPresent();
+        var hasSince = runContext.render(this.since).as(String.class).isPresent();
+        if (!hasGroupId && !hasTopicPattern && !hasSince) {
+            throw new IllegalArgumentException("Invalid Configuration: `groupId` is required when consuming a `topic` unless `topicPattern` or `since` is set.");
         }
     }
 

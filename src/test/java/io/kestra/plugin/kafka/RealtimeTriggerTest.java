@@ -440,6 +440,29 @@ class RealtimeTriggerTest {
         assertThat(received.size(), is(2));
     }
 
+    @Test
+    void shouldRejectTopicWithoutGroupIdAndSince() {
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .topic("some-topic")
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .build();
+
+        var failure = new AtomicReference<Throwable>();
+        Flux.from(trigger.publisher(trigger.consumeTask(), runContextFactory.of(Map.of())))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(record -> {}, failure::set);
+
+        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (failure.get() == null && System.currentTimeMillis() < deadline) {
+            Thread.onSpinWait();
+        }
+
+        assertThat(failure.get(), is(instanceOf(IllegalArgumentException.class)));
+        assertThat(failure.get().getMessage(), containsString("`groupId` is required"));
+    }
+
     void produce() throws Exception {
         Produce task = Produce.builder()
             .id(RealtimeTriggerTest.class.getSimpleName())

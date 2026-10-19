@@ -306,6 +306,40 @@ class ConsumeTest {
     }
 
     @Test
+    void shouldSeekToEndOffsetSnapshotTakenBeforeOffsetsForTimes() throws IllegalVariableEvaluationException {
+        // Given
+        var runContext = runContextFactory.of(Map.of());
+        var tp = new TopicPartition("topic", 0);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST) {
+            @Override
+            public Map<TopicPartition, Long> endOffsets(java.util.Collection<TopicPartition> partitions) {
+                // a record is appended after the first call
+                var end = calls.getAndIncrement() == 0 ? 5L : 6L;
+                return partitions.stream().collect(java.util.stream.Collectors.toMap(p -> p, p -> end));
+            }
+
+            @Override
+            public Map<TopicPartition, org.apache.kafka.clients.consumer.OffsetAndTimestamp> offsetsForTimes(Map<TopicPartition, Long> timestampsToSearch) {
+                var result = new HashMap<TopicPartition, org.apache.kafka.clients.consumer.OffsetAndTimestamp>();
+                timestampsToSearch.keySet().forEach(p -> result.put(p, null));
+                return result;
+            }
+        };
+        consumer.updatePartitions("topic", List.of(new PartitionInfo("topic", 0, null, null, null)));
+        Consume task = Consume.builder()
+            .topic("topic")
+            .since(Property.ofValue(Instant.now().toString()))
+            .build();
+
+        // When
+        task.topicSubscription(runContext).subscribe(runContext, consumer, task);
+
+        // Then
+        Assertions.assertEquals(5L, consumer.position(tp));
+    }
+
+    @Test
     void shouldGetTopicPartitionSubscriptionGivenPartition() throws IllegalVariableEvaluationException {
         // Given
         RunContext runContext = runContextFactory.of(Map.of());

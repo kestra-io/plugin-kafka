@@ -1137,19 +1137,14 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 .stream()
                 .collect(Collectors.toMap(Function.identity(), tp -> fromTimestamp));
 
+            // snapshot before offsetsForTimes(): a record appended in between must be read, not skipped
+            var endOffsets = consumer.endOffsets(this.topicPartitions);
             var offsets = consumer.offsetsForTimes(topicPartitionsTimestamp);
-            // no record at or after since: start from the end
-            var withoutRecord = this.topicPartitions.stream()
-                .filter(tp -> offsets.get(tp) == null)
-                .toList();
-            offsets.forEach((tp, offsetAndTimestamp) -> {
-                if (offsetAndTimestamp != null) {
-                    consumer.seek(tp, offsetAndTimestamp.offset());
-                }
+            // no record at or after since: start from the earlier end offset
+            this.topicPartitions.forEach(tp -> {
+                var offsetAndTimestamp = offsets.get(tp);
+                consumer.seek(tp, offsetAndTimestamp != null ? offsetAndTimestamp.offset() : endOffsets.get(tp));
             });
-            if (!withoutRecord.isEmpty()) {
-                consumer.endOffsets(withoutRecord).forEach(consumer::seek);
-            }
         }
 
         @Override
