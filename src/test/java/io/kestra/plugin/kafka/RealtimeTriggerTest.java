@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -419,9 +420,9 @@ class RealtimeTriggerTest {
             .build();
 
         var received = new CopyOnWriteArrayList<ConsumerRecord<Object, Object>>();
-        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = trigger.consumeTask();
+        var failure = new AtomicReference<Throwable>();
+        var runContext = runContextFactory.of(Map.of());
+        var task = trigger.consumeTask();
 
         Flux.from(trigger.publisher(task, runContext))
             .subscribeOn(Schedulers.boundedElastic())

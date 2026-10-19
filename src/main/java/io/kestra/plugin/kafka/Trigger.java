@@ -11,6 +11,7 @@ import io.kestra.core.models.triggers.*;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.slf4j.Logger;
@@ -31,7 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution.
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits and committed-only reads.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
-        Without `groupId`, partitions are assigned manually and no offsets are committed.
+        `groupId` is required: offsets are tracked by the consumer group so records are not delivered twice.
         If a poll's underlying execution is killed, offsets are not committed, so the consumed records will be redelivered on the next poll.
         A graceful stop (e.g. worker restart) instead completes the in-flight poll normally, committing what has already been consumed.
         Records are stored in internal storage at `{{ trigger.uri }}`; defaults use STRING deserializers.
@@ -106,6 +107,7 @@ public class Trigger extends AbstractTrigger implements PollingTriggerInterface,
 
     private Property<String> topicPattern;
 
+    @NotNull
     private Property<String> groupId;
 
     @Schema(

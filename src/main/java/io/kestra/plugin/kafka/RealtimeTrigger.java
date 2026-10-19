@@ -46,7 +46,8 @@ import java.util.concurrent.atomic.AtomicReference;
         Consumes Kafka messages as they arrive and starts one Execution per record.
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits (auto-commit disabled) and STRING deserializers by default.
         Configure `groupId`, `serdeProperties`, or `since` to control offsets and schema handling.
-        Without `groupId`, partitions are assigned manually and no offsets are committed.
+        Without `groupId`, partitions are assigned manually and no offsets are committed: every restart (worker restart, flow update) reads from the beginning again and starts one Execution per old record.
+        Set `since` (e.g. `"{{ now() }}"`) to read only new records when no `groupId` is used.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
         Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
@@ -133,6 +134,27 @@ import java.util.concurrent.atomic.AtomicReference;
                     groupId: orders-share-group
                     groupType: SHARE
                     acknowledgeType: ACCEPT
+                """
+        ),
+        @Example(
+            full = true,
+            title = "Read only new records without a consumer group, so a restart does not replay the topic",
+            code = """
+                id: kafka_realtime_no_group
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "{{ trigger.value ?? '' }}"
+
+                triggers:
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topicPattern: "orders-.*"
+                    since: "{{ now() }}"
+                    properties:
+                      bootstrap.servers: localhost:9092
                 """
         )
     }
@@ -334,9 +356,8 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             );
 
             if (subscription.hasNothingToConsume()) {
-                // poll() throws on an empty assignment, which would fail and restart the trigger in a loop.
-                // Idle until stopped instead; the matching topics are resolved once, so a restart is needed to pick up new ones.
-                logger.warn("Kafka trigger triggerId={} has no topic to consume (no topic matches `topicPattern`); idling until stopped", this.id);
+                // poll() throws on an empty assignment: idle until stopped instead
+                logger.warn("Kafka trigger triggerId={} has no partition to consume for {}; idling until stopped", this.id, subscription);
                 runPollingLoop(() -> {
                     try {
                         Thread.sleep(POLL_DURATION.toMillis());
@@ -347,9 +368,9 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 return;
             }
 
-            boolean deduplicate = runContext.render(task.getDeduplicate()).as(Boolean.class).orElse(false);
-            // consumer() copies `group.id` from properties into the task's groupId; commitSync() fails without a group
-            boolean hasGroupId = runContext.render(task.getGroupId()).as(String.class).isPresent();
+            var deduplicate = runContext.render(task.getDeduplicate()).as(Boolean.class).orElse(false);
+            // commitSync() fails without a group
+            var hasGroupId = runContext.render(task.getGroupId()).as(String.class).isPresent();
             Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);

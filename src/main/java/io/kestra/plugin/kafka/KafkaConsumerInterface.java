@@ -34,7 +34,7 @@ public interface KafkaConsumerInterface {
 
     @Schema(
         title = "Kafka consumer group ID",
-        description = "Determines offset management; mandatory for `groupType: SHARE` (share group). Without it, records are read from the beginning (or from `since`), no offsets are committed, and with `topicPattern` the matching topics are resolved once at startup, so topics created later are not picked up."
+        description = "Determines offset management; mandatory for `groupType: SHARE` (share group) and for the polling `Trigger`. Optional for `Consume` and `RealtimeTrigger`: without it, records are read from the beginning (or from `since`), no offsets are committed, and with `topicPattern` the matching topics are resolved once at startup, so topics created later are not picked up."
     )
     @PluginProperty(group = "advanced")
     Property<String> getGroupId();
