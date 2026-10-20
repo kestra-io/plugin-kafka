@@ -76,21 +76,199 @@ class ConsumeTest {
     }
 
     @Test
-    void shouldThrowIllegalGivenPatternAndNoGroupId() {
+    void shouldGetTopicPartitionSubscriptionGivenPatternAndNoGroupId() throws IllegalVariableEvaluationException {
         // Given
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume
             .builder()
-            .topicPattern(Property.ofValue(".*"))
+            .topicPattern(Property.ofValue("orders-.*"))
             .build();
-        // When/Then
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+        consumer.updatePartitions("orders-eu", List.of(new PartitionInfo("orders-eu", 0, null, null, null)));
+        consumer.updatePartitions("payments", List.of(new PartitionInfo("payments", 0, null, null, null)));
+
+        // When
+        var subscription = task.topicSubscription(runContext);
+        subscription.subscribe(runContext, consumer, task);
+
+        // Then
+        Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
+        Assertions.assertEquals(List.of(new TopicPartition("orders-eu", 0)), ((Consume.TopicPartitionsSubscription) subscription).topicPartitions());
+    }
+
+    @Test
+    void shouldAssignNothingGivenPatternMatchingNoTopic() throws IllegalVariableEvaluationException {
+        // Given
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume
+            .builder()
+            .topicPattern(Property.ofValue("nomatch-.*"))
+            .build();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+
+        // When
+        var subscription = task.topicSubscription(runContext);
+        subscription.subscribe(runContext, consumer, task);
+
+        // Then
+        Assertions.assertTrue(consumer.assignment().isEmpty());
+    }
+
+    @Test
+    void shouldHaveNothingToConsumeGivenPatternMatchingNoTopic() throws IllegalVariableEvaluationException {
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder().topicPattern(Property.ofValue("nomatch-.*")).build();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+
+        var subscription = task.topicSubscription(runContext);
+        subscription.subscribe(runContext, consumer, task);
+
+        Assertions.assertTrue(subscription.hasNothingToConsume());
+    }
+
+    @Test
+    void shouldReturnZeroMessagesGivenPatternMatchingNoTopic() throws Exception {
+        var task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topicPattern(Property.ofValue("tu_nomatch_" + IdUtils.create() + "_.*"))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+            .build();
+
+        var output = task.run(runContextFactory.of(Map.of()));
+
+        assertThat(output.getMessagesCount(), is(0));
+    }
+
+    @Test
+    void shouldReturnZeroMessagesGivenSinceAfterAllRecords() throws Exception {
+        var topic = "tu_since_future_" + IdUtils.create();
+        produceRecords(topic, 2);
+
+        for (var usePattern : List.of(false, true)) {
+            var builder = Consume.builder()
+                .id(IdUtils.create())
+                .type(Consume.class.getName())
+                .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+                .keyDeserializer(Property.ofValue(SerdeType.STRING))
+                .valueDeserializer(Property.ofValue(SerdeType.STRING))
+                .since(Property.ofValue(Instant.now().plusSeconds(60).toString()))
+                .pollDuration(Property.ofValue(Duration.ofSeconds(2)));
+            if (usePattern) {
+                builder.topicPattern(Property.ofValue(topic));
+            } else {
+                builder.topic(topic);
+            }
+
+            var output = builder.build().run(runContextFactory.of(Map.of()));
+
+            assertThat("usePattern=" + usePattern, output.getMessagesCount(), is(0));
+        }
+    }
+
+    @Test
+    void shouldPickUpRecordProducedAfterSubscribeGivenSinceAfterAllRecords() throws Exception {
+        var topic = "tu_since_new_" + IdUtils.create();
+        produceRecords(topic, 2);
+
+        var task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topicPattern(Property.ofValue(topic))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .since(Property.ofValue(Instant.now().plusSeconds(60).toString()))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
+            .build();
+        var runContext = runContextFactory.of(Map.of());
+
+        try (var consumer = task.consumer(runContext)) {
+            task.topicSubscription(runContext).subscribe(runContext, consumer, task);
+            assertThat(consumer.poll(Duration.ofSeconds(2)).count(), is(0));
+
+            produceRecords(topic, 1);
+
+            var received = 0;
+            var deadline = System.currentTimeMillis() + 15_000;
+            while (received == 0 && System.currentTimeMillis() < deadline) {
+                received += consumer.poll(Duration.ofSeconds(1)).count();
+            }
+            assertThat(received, is(1));
+        }
+    }
+
+    @Test
+    void shouldThrowGivenMissingTopicAndNoGroupId() throws IllegalVariableEvaluationException {
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder().topic("does-not-exist").build();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+
+        var subscription = task.topicSubscription(runContext);
+
+        Assertions.assertThrows(IllegalArgumentException.class, () -> subscription.subscribe(runContext, consumer, task));
+    }
+
+    @Test
+    void shouldThrowGivenInvalidPatternAndNoGroupId() {
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder().topicPattern(Property.ofValue("[")).build();
         Assertions.assertThrows(IllegalArgumentException.class, () -> task.topicSubscription(runContext));
+    }
+
+    @Test
+    void shouldConsumeMatchingTopicsGivenPatternAndNoGroupId() throws Exception {
+        var prefix = "tu_pattern_" + IdUtils.create();
+        var matching1 = prefix + "_a";
+        var matching2 = prefix + "_b";
+        var other = "tu_other_" + IdUtils.create();
+        produceRecords(matching1, 2);
+        produceRecords(matching2, 2);
+        produceRecords(other, 2);
+
+        var task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topicPattern(Property.ofValue(prefix + "_.*"))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .build();
+
+        var runContext = runContextFactory.of(Map.of());
+        var output = task.run(runContext);
+
+        assertThat(output.getMessagesCount(), is(4));
+        String content;
+        try (var in = runContext.storage().getFile(output.getUri())) {
+            content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        assertThat(content, Matchers.containsString(matching1));
+        assertThat(content, Matchers.containsString(matching2));
+        assertThat(content, Matchers.not(Matchers.containsString(other)));
+
+        try (var adminClient = AdminClient.create(Map.of(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, this.bootstrap))) {
+            for (var group : adminClient.listConsumerGroups().all().get(15, TimeUnit.SECONDS)) {
+                var offsets = adminClient.listConsumerGroupOffsets(group.groupId())
+                    .partitionsToOffsetAndMetadata()
+                    .get(15, TimeUnit.SECONDS);
+                assertThat(
+                    "No offsets must be committed when no group is configured",
+                    offsets.keySet().stream().noneMatch(tp -> tp.topic().startsWith(prefix)),
+                    is(true)
+                );
+            }
+        }
     }
 
     @Test
     void shouldGetTopicPartitionSubscriptionGivenTopicAndNoGroupId() throws IllegalVariableEvaluationException {
         // Given
-        RunContext runContext = runContextFactory.of(Map.of());
+        var runContext = runContextFactory.of(Map.of());
         Consume task = Consume
             .builder()
             .topic("topic")
@@ -98,7 +276,9 @@ class ConsumeTest {
 
         // When
         Consume.ConsumerSubscription subscription = task.topicSubscription(runContext);
-        subscription.subscribe(runContext, new MockConsumer<>(OffsetResetStrategy.EARLIEST), task);
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST);
+        consumer.updatePartitions("topic", List.of(new PartitionInfo("topic", 0, null, null, null)));
+        subscription.subscribe(runContext, consumer, task);
 
         // Then
         Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
@@ -123,6 +303,40 @@ class ConsumeTest {
         Assertions.assertInstanceOf(Consume.TopicPartitionsSubscription.class, subscription);
         Assertions.assertEquals(List.of("topic"), ((Consume.TopicPartitionsSubscription) subscription).topics());
         Assertions.assertEquals(now.toEpochMilli(), ((Consume.TopicPartitionsSubscription) subscription).fromTimestamp());
+    }
+
+    @Test
+    void shouldSeekToEndOffsetSnapshotTakenBeforeOffsetsForTimes() throws IllegalVariableEvaluationException {
+        // Given
+        var runContext = runContextFactory.of(Map.of());
+        var tp = new TopicPartition("topic", 0);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var consumer = new MockConsumer<Object, Object>(OffsetResetStrategy.EARLIEST) {
+            @Override
+            public Map<TopicPartition, Long> endOffsets(java.util.Collection<TopicPartition> partitions) {
+                // a record is appended after the first call
+                var end = calls.getAndIncrement() == 0 ? 5L : 6L;
+                return partitions.stream().collect(java.util.stream.Collectors.toMap(p -> p, p -> end));
+            }
+
+            @Override
+            public Map<TopicPartition, org.apache.kafka.clients.consumer.OffsetAndTimestamp> offsetsForTimes(Map<TopicPartition, Long> timestampsToSearch) {
+                var result = new HashMap<TopicPartition, org.apache.kafka.clients.consumer.OffsetAndTimestamp>();
+                timestampsToSearch.keySet().forEach(p -> result.put(p, null));
+                return result;
+            }
+        };
+        consumer.updatePartitions("topic", List.of(new PartitionInfo("topic", 0, null, null, null)));
+        Consume task = Consume.builder()
+            .topic("topic")
+            .since(Property.ofValue(Instant.now().toString()))
+            .build();
+
+        // When
+        task.topicSubscription(runContext).subscribe(runContext, consumer, task);
+
+        // Then
+        Assertions.assertEquals(5L, consumer.position(tp));
     }
 
     @Test

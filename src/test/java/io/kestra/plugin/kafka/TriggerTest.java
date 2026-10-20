@@ -13,6 +13,7 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Inject;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +35,9 @@ import static org.hamcrest.Matchers.notNullValue;
 class TriggerTest {
     @Inject
     private RunContextFactory runContextFactory;
+
+    @Inject
+    private Validator validator;
 
     @Value("${kafka.bootstrap}")
     private String bootstrap;
@@ -64,6 +68,19 @@ class TriggerTest {
             .build();
 
         task.run(runContextFactory.of(Map.of()));
+    }
+
+    @Test
+    void shouldRejectMissingGroupId() {
+        var trigger = Trigger.builder()
+            .id(TriggerTest.class.getSimpleName())
+            .type(Trigger.class.getName())
+            .topic("tu_trigger")
+            .build();
+
+        var violations = validator.validate(trigger);
+
+        assertThat(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("groupId")), is(true));
     }
 
     @Test

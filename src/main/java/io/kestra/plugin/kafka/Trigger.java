@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Polls Kafka on a fixed interval (default PT1M, pollDuration PT5S) to batch records into one Execution.
         In `groupType: CONSUMER` (default), behavior is classic consumer groups with manual offset commits and committed-only reads.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
+        `groupId` is required: offsets are tracked by the consumer group so records are not delivered twice.
         If a poll's underlying execution is killed, offsets are not committed, so the consumed records will be redelivered on the next poll.
         A graceful stop (e.g. worker restart) instead completes the in-flight poll normally, committing what has already been consumed.
         Records are stored in internal storage at `{{ trigger.uri }}`; defaults use STRING deserializers.
