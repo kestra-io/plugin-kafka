@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -389,6 +390,77 @@ class RealtimeTriggerTest {
             assertThat("Trigger must terminate within 5s of stop()", terminated, is(true));
             assertThat("stop() must not block longer than 5s", stopMs, lessThan(5000L));
         }
+    }
+
+    @Test
+    void shouldReceiveRecordsGivenPatternAndNoGroupId() throws Exception {
+        var prefix = "tu_rt_pattern_" + IdUtils.create();
+        var topic = prefix + "_a";
+        var produceTask = Produce.builder()
+            .id(IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(List.of(
+                ImmutableMap.of("key", "key1", "value", "value1"),
+                ImmutableMap.of("key", "key2", "value", "value2")
+            ))
+            .build();
+        produceTask.run(runContextFactory.of(Map.of()));
+
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .topicPattern(Property.ofValue(prefix + "_.*"))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .build();
+
+        var received = new CopyOnWriteArrayList<ConsumerRecord<Object, Object>>();
+        var failure = new AtomicReference<Throwable>();
+        var runContext = runContextFactory.of(Map.of());
+        var task = trigger.consumeTask();
+
+        Flux.from(trigger.publisher(task, runContext))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(received::add, failure::set);
+
+        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+        while (received.size() < 2 && failure.get() == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(200);
+        }
+        // let at least one more poll loop run so a commitSync failure would surface
+        Thread.sleep(1500);
+        trigger.stop();
+
+        assertThat("No error expected without a group id", failure.get(), is(nullValue()));
+        assertThat(received.size(), is(2));
+    }
+
+    @Test
+    void shouldRejectTopicWithoutGroupIdAndSince() {
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .topic("some-topic")
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .build();
+
+        var failure = new AtomicReference<Throwable>();
+        Flux.from(trigger.publisher(trigger.consumeTask(), runContextFactory.of(Map.of())))
+            .subscribeOn(Schedulers.boundedElastic())
+            .subscribe(record -> {}, failure::set);
+
+        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(10);
+        while (failure.get() == null && System.currentTimeMillis() < deadline) {
+            Thread.onSpinWait();
+        }
+
+        assertThat(failure.get(), is(instanceOf(IllegalArgumentException.class)));
+        assertThat(failure.get().getMessage(), containsString("`groupId` is required"));
     }
 
     void produce() throws Exception {
