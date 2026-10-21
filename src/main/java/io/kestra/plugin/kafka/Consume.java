@@ -822,9 +822,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             return true;
         }
 
-        final Optional<Duration> renderedMaxDuration = runContext.render(this.maxDuration).as(Duration.class);
-        if (renderedMaxDuration.isPresent()) {
-            return Instant.now().isAfter(start.toInstant().plus(renderedMaxDuration.get()));
+        var rMaxDuration = runContext.render(this.maxDuration).as(Duration.class);
+        if (rMaxDuration.isPresent()) {
+            return Instant.now().isAfter(start.toInstant().plus(rMaxDuration.get()));
         }
 
         final Optional<Duration> renderedPollDuration = runContext.render(this.pollDuration).as(Duration.class);

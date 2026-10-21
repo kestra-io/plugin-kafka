@@ -37,10 +37,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.notNullValue;
@@ -560,77 +562,77 @@ class ConsumeTest {
 
     @Test
     void shouldEndWhenMaxDurationExceeded() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder()
             .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
             .build();
 
-        ZonedDateTime startInPast = ZonedDateTime.now().minusSeconds(10);
+        var startInPast = ZonedDateTime.now().minusSeconds(10);
         Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(1), startInPast));
     }
 
     @Test
     void shouldNotEndWhenMaxDurationNotExceeded() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder()
             .pollDuration(Property.ofValue(Duration.ofSeconds(1)))
             .maxDuration(Property.ofValue(Duration.ofSeconds(60)))
             .build();
 
         // 5 seconds elapsed: pollDuration (1s) has passed, but maxDuration (60s) has not
-        ZonedDateTime start = ZonedDateTime.now().minusSeconds(5);
+        var start = ZonedDateTime.now().minusSeconds(5);
         Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(1), start));
     }
 
     @Test
     void shouldRenderDynamicMaxDurationInEnded() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of("maxDuration", "PT10S"));
-        Consume task = Consume.builder()
+        var runContext = runContextFactory.of(Map.of("maxDuration", "PT10S"));
+        var task = Consume.builder()
             .pollDuration(Property.ofValue(Duration.ofSeconds(1)))
             .maxDuration(Property.ofExpression("{{ maxDuration }}"))
             .build();
 
-        ZonedDateTime startExceeded = ZonedDateTime.now().minusSeconds(15);
+        var startExceeded = ZonedDateTime.now().minusSeconds(15);
         Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(1), startExceeded));
 
-        ZonedDateTime startNotExceeded = ZonedDateTime.now().minusSeconds(2);
+        var startNotExceeded = ZonedDateTime.now().minusSeconds(2);
         Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(1), startNotExceeded));
     }
 
     @Test
     void shouldEndWhenPollDurationExceededAndMaxDurationNotSet() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder()
             .pollDuration(Property.ofValue(Duration.ofSeconds(5)))
             .build();
 
-        ZonedDateTime startInPast = ZonedDateTime.now().minusSeconds(10);
+        var startInPast = ZonedDateTime.now().minusSeconds(10);
         Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(1), startInPast));
     }
 
     @Test
     void shouldNotEndWhenPollDurationNotExceededAndMaxDurationNotSet() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder()
             .pollDuration(Property.ofValue(Duration.ofSeconds(5)))
             .build();
 
-        ZonedDateTime start = ZonedDateTime.now();
+        var start = ZonedDateTime.now();
         Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(1), start));
     }
 
     @Test
     void shouldEndWhenEmptyRecords() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder().build();
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder().build();
 
         Assertions.assertTrue(task.ended(runContext, true, new AtomicInteger(0), ZonedDateTime.now()));
     }
 
     @Test
     void shouldEndWhenMaxRecordsExceeded() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder()
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder()
             .maxRecords(Property.ofValue(5))
             .build();
 
@@ -640,11 +642,84 @@ class ConsumeTest {
 
     @Test
     void shouldEndWhenTaskInactive() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        Consume task = Consume.builder().build();
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder().build();
         task.stop();
 
         Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(0), ZonedDateTime.now()));
+    }
+
+    @Test
+    void shouldKeepConsumingPastPollDurationWhenMaxDurationIsLonger() throws Exception {
+        var topic = "tu_max_dur_" + IdUtils.create();
+        var groupId = "tu_max_dur_group_" + IdUtils.create();
+        var pollDuration = Duration.ofSeconds(5);
+        var maxDuration = Duration.ofSeconds(12);
+
+        // Produce initial record so topic exists and consumer can read immediately
+        produceRecords(topic, 1);
+
+        var producing = new AtomicBoolean(true);
+        var producerStarted = new CountDownLatch(1);
+        var producedDuringPollDuration = new AtomicInteger(1);
+        var producedAfterPollDuration = new AtomicInteger(0);
+        var taskStartTime = new AtomicReference<Instant>();
+
+        var producerThread = new Thread(() -> {
+            producerStarted.countDown();
+            try {
+                while (producing.get()) {
+                    Thread.sleep(300);
+                    produceRecords(topic, 1);
+                    var start = taskStartTime.get();
+                    if (start == null || Duration.between(start, Instant.now()).toMillis() < pollDuration.toMillis()) {
+                        producedDuringPollDuration.incrementAndGet();
+                    } else {
+                        producedAfterPollDuration.incrementAndGet();
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception ignored) {
+            }
+        });
+        producerThread.start();
+        producerStarted.await(5, TimeUnit.SECONDS);
+
+        var task = Consume.builder()
+            .id(IdUtils.create())
+            .type(Consume.class.getName())
+            .topic(topic)
+            .groupId(Property.ofValue(groupId))
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "auto.offset.reset", "earliest"
+            )))
+            .keyDeserializer(Property.ofValue(SerdeType.STRING))
+            .valueDeserializer(Property.ofValue(SerdeType.STRING))
+            .pollDuration(Property.ofValue(pollDuration))
+            .maxDuration(Property.ofValue(maxDuration))
+            .build();
+
+        var runContext = runContextFactory.of(Map.of());
+        var start = Instant.now();
+        taskStartTime.set(start);
+        try {
+            var output = task.run(runContext);
+            var elapsed = Duration.between(start, Instant.now()).toMillis();
+
+            assertThat("Run must last longer than pollDuration", elapsed, greaterThan(pollDuration.toMillis()));
+            assertThat("Records must have been produced after pollDuration", producedAfterPollDuration.get(), greaterThan(0));
+            assertThat(
+                "Messages count must include records produced after pollDuration",
+                output.getMessagesCount(),
+                greaterThan(producedDuringPollDuration.get())
+            );
+        } finally {
+            producing.set(false);
+            producerThread.interrupt();
+            producerThread.join(5000);
+        }
     }
 
     @Test
