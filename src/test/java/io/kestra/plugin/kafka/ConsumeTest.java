@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -36,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -554,6 +556,95 @@ class ConsumeTest {
 
         var exception = Assertions.assertThrows(IllegalStateException.class, () -> QueueAcknowledgeType.RENEW.toKafkaType());
         Assertions.assertTrue(exception.getMessage().contains("not supported"));
+    }
+
+    @Test
+    void shouldEndWhenMaxDurationExceeded() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder()
+            .maxDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .build();
+
+        ZonedDateTime startInPast = ZonedDateTime.now().minusSeconds(10);
+        Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(1), startInPast));
+    }
+
+    @Test
+    void shouldNotEndWhenMaxDurationNotExceeded() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder()
+            .pollDuration(Property.ofValue(Duration.ofSeconds(1)))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(60)))
+            .build();
+
+        // 5 seconds elapsed: pollDuration (1s) has passed, but maxDuration (60s) has not
+        ZonedDateTime start = ZonedDateTime.now().minusSeconds(5);
+        Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(1), start));
+    }
+
+    @Test
+    void shouldRenderDynamicMaxDurationInEnded() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of("maxDuration", "PT10S"));
+        Consume task = Consume.builder()
+            .pollDuration(Property.ofValue(Duration.ofSeconds(1)))
+            .maxDuration(Property.ofExpression("{{ maxDuration }}"))
+            .build();
+
+        ZonedDateTime startExceeded = ZonedDateTime.now().minusSeconds(15);
+        Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(1), startExceeded));
+
+        ZonedDateTime startNotExceeded = ZonedDateTime.now().minusSeconds(2);
+        Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(1), startNotExceeded));
+    }
+
+    @Test
+    void shouldEndWhenPollDurationExceededAndMaxDurationNotSet() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder()
+            .pollDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .build();
+
+        ZonedDateTime startInPast = ZonedDateTime.now().minusSeconds(10);
+        Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(1), startInPast));
+    }
+
+    @Test
+    void shouldNotEndWhenPollDurationNotExceededAndMaxDurationNotSet() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder()
+            .pollDuration(Property.ofValue(Duration.ofSeconds(5)))
+            .build();
+
+        ZonedDateTime start = ZonedDateTime.now();
+        Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(1), start));
+    }
+
+    @Test
+    void shouldEndWhenEmptyRecords() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder().build();
+
+        Assertions.assertTrue(task.ended(runContext, true, new AtomicInteger(0), ZonedDateTime.now()));
+    }
+
+    @Test
+    void shouldEndWhenMaxRecordsExceeded() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder()
+            .maxRecords(Property.ofValue(5))
+            .build();
+
+        Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(6), ZonedDateTime.now()));
+        Assertions.assertFalse(task.ended(runContext, false, new AtomicInteger(5), ZonedDateTime.now()));
+    }
+
+    @Test
+    void shouldEndWhenTaskInactive() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        Consume task = Consume.builder().build();
+        task.stop();
+
+        Assertions.assertTrue(task.ended(runContext, false, new AtomicInteger(0), ZonedDateTime.now()));
     }
 
     @Test
