@@ -40,12 +40,20 @@ class TopicAdminTest {
      */
     private static <T> T awaitCondition(Callable<T> action, Predicate<T> condition, long timeoutMs) throws Exception {
         long deadline = System.currentTimeMillis() + timeoutMs;
-        T result = action.call();
-        while (!condition.test(result) && System.currentTimeMillis() < deadline) {
+        while (true) {
+            try {
+                T result = action.call();
+                if (condition.test(result) || System.currentTimeMillis() >= deadline) {
+                    return result;
+                }
+            } catch (UnknownTopicOrPartitionException e) {
+                // topic metadata not yet propagated right after create
+                if (System.currentTimeMillis() >= deadline) {
+                    throw e;
+                }
+            }
             Thread.sleep(500);
-            result = action.call();
         }
-        return result;
     }
 
     @Test
@@ -108,7 +116,7 @@ class TopicAdminTest {
             .topic(Property.ofValue(topic))
             .retentionMs(Property.ofValue(3600000L))
             .build();
-        TopicUpdate.Output updateOutput = update.run(runContext);
+        TopicUpdate.Output updateOutput = awaitCondition(() -> update.run(runContext), output -> true, 10_000);
         assertThat(updateOutput.getUpdatedConfigs().get("retention.ms"), is("3600000"));
 
         TopicDescribe describe = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
