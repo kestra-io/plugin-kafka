@@ -5,6 +5,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Inject;
 import org.apache.kafka.common.errors.TopicExistsException;
@@ -97,6 +98,56 @@ class TopicAdminTest {
         TopicDelete delete = TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build();
         TopicDelete.Output deleteOutput = delete.run(runContext);
         assertThat(deleteOutput.getDeletedTopics(), contains(topic));
+    }
+
+    @Test
+    void shouldDescribeTopicWithOffsets() throws Exception {
+        RunContext runContext = runContextFactory.of(Map.of());
+        String topic = "tu_admin_offsets_" + IdUtils.create();
+
+        TopicCreate.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .partitions(Property.ofValue(1))
+            .replicationFactor(Property.ofValue(1))
+            .build()
+            .run(runContext);
+
+        Produce produce = Produce.builder()
+            .properties(connection())
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(List.of(
+                Map.of("key", "k1", "value", "v1"),
+                Map.of("key", "k2", "value", "v2"),
+                Map.of("key", "k3", "value", "v3")
+            ))
+            .build();
+        Produce.Output produceOutput = awaitCondition(() -> produce.run(runContext), output -> true, 10_000);
+        assertThat(produceOutput.getMessagesCount(), is(3));
+
+        TopicDescribe describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
+        TopicDescribe.Output plainOutput = describeWithoutOffsets.run(runContext);
+        assertThat(plainOutput.getPartitions(), hasSize(1));
+        assertThat(plainOutput.getPartitions().getFirst().keySet(), not(hasItems("earliestOffset", "latestOffset")));
+
+        TopicDescribe describeWithOffsets = TopicDescribe.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .includeOffsets(Property.ofValue(true))
+            .build();
+        TopicDescribe.Output offsetsOutput = awaitCondition(
+            () -> describeWithOffsets.run(runContext),
+            output -> Long.valueOf(3L).equals(output.getPartitions().getFirst().get("latestOffset")),
+            10_000
+        );
+        Map<String, Object> partition = offsetsOutput.getPartitions().getFirst();
+        assertThat(partition.get("partition"), is(0));
+        assertThat(partition.get("earliestOffset"), is(0L));
+        assertThat(partition.get("latestOffset"), is(3L));
+
+        TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
     }
 
     @Test
