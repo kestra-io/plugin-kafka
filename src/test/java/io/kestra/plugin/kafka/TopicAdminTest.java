@@ -102,8 +102,8 @@ class TopicAdminTest {
 
     @Test
     void shouldDescribeTopicWithOffsets() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
-        String topic = "tu_admin_offsets_" + IdUtils.create();
+        var runContext = runContextFactory.of(Map.of());
+        var topic = "tu_admin_offsets_%s".formatted(IdUtils.create());
 
         TopicCreate.builder()
             .properties(connection())
@@ -113,7 +113,7 @@ class TopicAdminTest {
             .build()
             .run(runContext);
 
-        Produce produce = Produce.builder()
+        var produce = Produce.builder()
             .properties(connection())
             .keySerializer(Property.ofValue(SerdeType.STRING))
             .valueSerializer(Property.ofValue(SerdeType.STRING))
@@ -124,25 +124,25 @@ class TopicAdminTest {
                 Map.of("key", "k3", "value", "v3")
             ))
             .build();
-        Produce.Output produceOutput = awaitCondition(() -> produce.run(runContext), output -> true, 10_000);
+        var produceOutput = awaitCondition(() -> produce.run(runContext), output -> true, 10_000);
         assertThat(produceOutput.getMessagesCount(), is(3));
 
-        TopicDescribe describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
-        TopicDescribe.Output plainOutput = describeWithoutOffsets.run(runContext);
+        var describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
+        var plainOutput = describeWithoutOffsets.run(runContext);
         assertThat(plainOutput.getPartitions(), hasSize(1));
-        assertThat(plainOutput.getPartitions().getFirst().keySet(), not(hasItems("earliestOffset", "latestOffset")));
+        assertThat(plainOutput.getPartitions().getFirst().keySet(), contains("partition", "leader", "replicas", "isr"));
 
-        TopicDescribe describeWithOffsets = TopicDescribe.builder()
+        var describeWithOffsets = TopicDescribe.builder()
             .properties(connection())
             .topic(Property.ofValue(topic))
             .includeOffsets(Property.ofValue(true))
             .build();
-        TopicDescribe.Output offsetsOutput = awaitCondition(
+        var offsetsOutput = awaitCondition(
             () -> describeWithOffsets.run(runContext),
             output -> Long.valueOf(3L).equals(output.getPartitions().getFirst().get("latestOffset")),
             10_000
         );
-        Map<String, Object> partition = offsetsOutput.getPartitions().getFirst();
+        var partition = offsetsOutput.getPartitions().getFirst();
         assertThat(partition.get("partition"), is(0));
         assertThat(partition.get("earliestOffset"), is(0L));
         assertThat(partition.get("latestOffset"), is(3L));

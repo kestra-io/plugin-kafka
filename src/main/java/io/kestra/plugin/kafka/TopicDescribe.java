@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
                 """
         ),
         @Example(
-            title = "Check how many records are retained in each partition",
+            title = "Check the offset range retained in each partition",
             full = true,
             code = """
                 id: kafka_topic_offsets
@@ -82,7 +82,7 @@ import java.util.stream.Collectors;
                     type: io.kestra.plugin.core.log.Log
                     message: |
                       {% for p in outputs.topic_describe.partitions %}
-                      partition {{ p.partition }}: {{ p.latestOffset - p.earliestOffset }} records retained
+                      partition {{ p.partition }}: offsets {{ p.earliestOffset }} to {{ p.latestOffset }}
                       {% endfor %}
                 """
         )
@@ -125,8 +125,8 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
                 configs.put(entry.name(), entry.value());
             }
 
-            Map<TopicPartition, Long> earliestOffsets = Map.of();
-            Map<TopicPartition, Long> latestOffsets = Map.of();
+            var earliestOffsets = Map.<Integer, Long>of();
+            var latestOffsets = Map.<Integer, Long>of();
             if (rIncludeOffsets) {
                 var topicPartitions = description.partitions().stream()
                     .map(info -> new TopicPartition(rTopic, info.partition()))
@@ -136,9 +136,8 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
             }
 
             var partitions = new ArrayList<Map<String, Object>>(description.partitions().size());
-            for (TopicPartitionInfo info : description.partitions()) {
-                var topicPartition = new TopicPartition(rTopic, info.partition());
-                partitions.add(partitionInfo(info, earliestOffsets.get(topicPartition), latestOffsets.get(topicPartition)));
+            for (var info : description.partitions()) {
+                partitions.add(partitionInfo(info, earliestOffsets.get(info.partition()), latestOffsets.get(info.partition())));
             }
 
             var replicationFactor = description.partitions().isEmpty() ? 0 : description.partitions().getFirst().replicas().size();
@@ -153,13 +152,13 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
         }
     }
 
-    private Map<TopicPartition, Long> listOffsets(AdminClient admin, List<TopicPartition> topicPartitions, OffsetSpec spec, Duration timeout) throws Exception {
+    private static Map<Integer, Long> listOffsets(AdminClient admin, List<TopicPartition> topicPartitions, OffsetSpec spec, Duration timeout) throws Exception {
         var request = topicPartitions.stream().collect(Collectors.toMap(tp -> tp, tp -> spec));
         return get(admin.listOffsets(request).all(), timeout).entrySet().stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().offset()));
+            .collect(Collectors.toMap(e -> e.getKey().partition(), e -> e.getValue().offset()));
     }
 
-    static Map<String, Object> partitionInfo(TopicPartitionInfo info, Long earliestOffset, Long latestOffset) {
+    private static Map<String, Object> partitionInfo(TopicPartitionInfo info, Long earliestOffset, Long latestOffset) {
         var partition = new LinkedHashMap<String, Object>();
         partition.put("partition", info.partition());
         partition.put("leader", info.leader() != null ? info.leader().idString() : null);
