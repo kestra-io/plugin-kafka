@@ -113,41 +113,45 @@ class TopicAdminTest {
             .build()
             .run(runContext);
 
-        var produce = Produce.builder()
-            .properties(connection())
-            .keySerializer(Property.ofValue(SerdeType.STRING))
-            .valueSerializer(Property.ofValue(SerdeType.STRING))
-            .topic(Property.ofValue(topic))
-            .from(List.of(
-                Map.of("key", "k1", "value", "v1"),
-                Map.of("key", "k2", "value", "v2"),
-                Map.of("key", "k3", "value", "v3")
-            ))
-            .build();
-        var produceOutput = awaitCondition(() -> produce.run(runContext), output -> true, 10_000);
-        assertThat(produceOutput.getMessagesCount(), is(3));
+        try {
+            var produce = Produce.builder()
+                .properties(connection())
+                // A transaction commit marker would take an offset of its own
+                .transactional(Property.ofValue(false))
+                .keySerializer(Property.ofValue(SerdeType.STRING))
+                .valueSerializer(Property.ofValue(SerdeType.STRING))
+                .topic(Property.ofValue(topic))
+                .from(List.of(
+                    Map.of("key", "k1", "value", "v1"),
+                    Map.of("key", "k2", "value", "v2"),
+                    Map.of("key", "k3", "value", "v3")
+                ))
+                .build();
+            var produceOutput = awaitCondition(() -> produce.run(runContext), output -> true, 10_000);
+            assertThat(produceOutput.getMessagesCount(), is(3));
 
-        var describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
-        var plainOutput = describeWithoutOffsets.run(runContext);
-        assertThat(plainOutput.getPartitions(), hasSize(1));
-        assertThat(plainOutput.getPartitions().getFirst().keySet(), contains("partition", "leader", "replicas", "isr"));
+            var describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
+            var plainOutput = describeWithoutOffsets.run(runContext);
+            assertThat(plainOutput.getPartitions(), hasSize(1));
+            assertThat(plainOutput.getPartitions().getFirst().keySet(), contains("partition", "leader", "replicas", "isr"));
 
-        var describeWithOffsets = TopicDescribe.builder()
-            .properties(connection())
-            .topic(Property.ofValue(topic))
-            .includeOffsets(Property.ofValue(true))
-            .build();
-        var offsetsOutput = awaitCondition(
-            () -> describeWithOffsets.run(runContext),
-            output -> Long.valueOf(3L).equals(output.getPartitions().getFirst().get("latestOffset")),
-            10_000
-        );
-        var partition = offsetsOutput.getPartitions().getFirst();
-        assertThat(partition.get("partition"), is(0));
-        assertThat(partition.get("earliestOffset"), is(0L));
-        assertThat(partition.get("latestOffset"), is(3L));
-
-        TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+            var describeWithOffsets = TopicDescribe.builder()
+                .properties(connection())
+                .topic(Property.ofValue(topic))
+                .includeOffsets(Property.ofValue(true))
+                .build();
+            var offsetsOutput = awaitCondition(
+                () -> describeWithOffsets.run(runContext),
+                output -> Long.valueOf(3L).equals(output.getPartitions().getFirst().get("latestOffset")),
+                10_000
+            );
+            var partition = offsetsOutput.getPartitions().getFirst();
+            assertThat(partition.get("partition"), is(0));
+            assertThat(partition.get("earliestOffset"), is(0L));
+            assertThat(partition.get("latestOffset"), is(3L));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
     }
 
     @Test

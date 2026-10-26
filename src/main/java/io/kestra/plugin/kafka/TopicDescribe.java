@@ -22,12 +22,9 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.TopicPartitionInfo;
 import org.apache.kafka.common.config.ConfigResource;
 
-import java.time.Duration;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 @SuperBuilder
 @ToString
@@ -98,9 +95,9 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
     @Schema(
         title = "Include partition offsets",
         description = """
-            When true, each partition entry also contains `earliestOffset` (log start offset) and `latestOffset`
-            (log end offset, the next offset to be written), fetched with two batched `listOffsets` requests.
-            Defaults to false, which keeps the output and the broker requests unchanged.
+            When true, each partition entry also contains `earliestOffset` (log start offset) and `latestOffset` (high watermark, the offset of the next record a consumer can read), fetched with two batched `listOffsets` requests.
+            Transaction markers take offsets too, so `latestOffset - earliestOffset` can be larger than the record count. Both are null for a partition without a leader.
+            Defaults to false, with no extra broker request and no offset keys.
             """
     )
     @NotNull
@@ -125,20 +122,16 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
                 configs.put(entry.name(), entry.value());
             }
 
-            var earliestOffsets = Map.<Integer, Long>of();
-            var latestOffsets = Map.<Integer, Long>of();
-            if (rIncludeOffsets) {
-                var topicPartitions = description.partitions().stream()
-                    .map(info -> new TopicPartition(rTopic, info.partition()))
-                    .toList();
-                earliestOffsets = listOffsets(admin, topicPartitions, OffsetSpec.earliest(), timeout);
-                latestOffsets = listOffsets(admin, topicPartitions, OffsetSpec.latest(), timeout);
-            }
+            // A partition without a leader cannot answer ListOffsets and would fail the whole request after callTimeout
+            var ledPartitions = rIncludeOffsets
+                ? description.partitions().stream().filter(info -> info.leader() != null).map(info -> new TopicPartition(rTopic, info.partition())).toList()
+                : List.<TopicPartition>of();
+            var earliestOffsets = listOffsets(admin, ledPartitions, OffsetSpec.earliest(), timeout);
+            var latestOffsets = listOffsets(admin, ledPartitions, OffsetSpec.latest(), timeout);
 
-            var partitions = new ArrayList<Map<String, Object>>(description.partitions().size());
-            for (var info : description.partitions()) {
-                partitions.add(partitionInfo(info, earliestOffsets.get(info.partition()), latestOffsets.get(info.partition())));
-            }
+            var partitions = description.partitions().stream()
+                .map(info -> partitionInfo(info, rIncludeOffsets, new TopicPartition(rTopic, info.partition()), earliestOffsets, latestOffsets))
+                .toList();
 
             var replicationFactor = description.partitions().isEmpty() ? 0 : description.partitions().getFirst().replicas().size();
 
@@ -152,24 +145,16 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
         }
     }
 
-    private static Map<Integer, Long> listOffsets(AdminClient admin, List<TopicPartition> topicPartitions, OffsetSpec spec, Duration timeout) throws Exception {
-        var request = topicPartitions.stream().collect(Collectors.toMap(tp -> tp, tp -> spec));
-        return get(admin.listOffsets(request).all(), timeout).entrySet().stream()
-            .collect(Collectors.toMap(e -> e.getKey().partition(), e -> e.getValue().offset()));
-    }
-
-    private static Map<String, Object> partitionInfo(TopicPartitionInfo info, Long earliestOffset, Long latestOffset) {
+    private static Map<String, Object> partitionInfo(TopicPartitionInfo info, boolean includeOffsets, TopicPartition topicPartition, Map<TopicPartition, Long> earliestOffsets, Map<TopicPartition, Long> latestOffsets) {
         var partition = new LinkedHashMap<String, Object>();
         partition.put("partition", info.partition());
         partition.put("leader", info.leader() != null ? info.leader().idString() : null);
         partition.put("replicas", info.replicas().stream().map(Node::idString).toList());
         partition.put("isr", info.isr().stream().map(Node::idString).toList());
-        // offsets are only present when includeOffsets is true, so the default output stays unchanged
-        if (earliestOffset != null) {
-            partition.put("earliestOffset", earliestOffset);
-        }
-        if (latestOffset != null) {
-            partition.put("latestOffset", latestOffset);
+        // Keys are always present with includeOffsets, null for a partition without a leader, so Pebble can read them in strict mode
+        if (includeOffsets) {
+            partition.put("earliestOffset", earliestOffsets.get(topicPartition));
+            partition.put("latestOffset", latestOffsets.get(topicPartition));
         }
         return partition;
     }
@@ -188,7 +173,10 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
 
         @Schema(
             title = "Per-partition layout",
-            description = "Each entry contains `partition`, `leader`, `replicas` and `isr` (in-sync replicas broker IDs). With `includeOffsets: true` it also contains `earliestOffset` and `latestOffset`."
+            description = """
+                Each entry contains `partition`, `leader`, `replicas` and `isr` (in-sync replicas broker IDs).
+                With `includeOffsets: true` it also contains `earliestOffset` and `latestOffset`.
+                """
         )
         private final List<Map<String, Object>> partitions;
 
