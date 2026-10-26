@@ -10,16 +10,21 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
+import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.TopicPartition;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 @SuperBuilder
 @ToString
@@ -97,5 +102,14 @@ public abstract class AbstractKafkaAdminTask extends Task {
                 "AdminClient operation did not complete within " + timeout + " — increase the `callTimeout` property or check broker connectivity"
             ).initCause(e);
         }
+    }
+
+    protected static Map<TopicPartition, Long> listOffsets(AdminClient admin, Collection<TopicPartition> partitions, OffsetSpec spec, Duration timeout) throws Exception {
+        if (partitions.isEmpty()) {
+            return Map.of();
+        }
+        var request = partitions.stream().collect(Collectors.toMap(tp -> tp, tp -> spec));
+        return get(admin.listOffsets(request).all(), timeout).entrySet().stream()
+            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().offset()));
     }
 }
