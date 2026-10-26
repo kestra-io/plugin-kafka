@@ -127,7 +127,7 @@ class TopicAdminTest {
                     Map.of("key", "k3", "value", "v3")
                 ))
                 .build();
-            var produceOutput = awaitCondition(() -> produce.run(runContext), output -> true, 10_000);
+            var produceOutput = produce.run(runContext);
             assertThat(produceOutput.getMessagesCount(), is(3));
 
             var describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();

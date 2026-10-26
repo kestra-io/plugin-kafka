@@ -124,7 +124,10 @@ public class TopicDescribe extends AbstractKafkaAdminTask implements RunnableTas
 
             // A partition without a leader cannot answer ListOffsets and would fail the whole request after callTimeout
             var ledPartitions = rIncludeOffsets
-                ? description.partitions().stream().filter(info -> info.leader() != null).map(info -> new TopicPartition(rTopic, info.partition())).toList()
+                ? description.partitions().stream()
+                    .filter(info -> info.leader() != null)
+                    .map(info -> new TopicPartition(rTopic, info.partition()))
+                    .toList()
                 : List.<TopicPartition>of();
             var earliestOffsets = listOffsets(admin, ledPartitions, OffsetSpec.earliest(), timeout);
             var latestOffsets = listOffsets(admin, ledPartitions, OffsetSpec.latest(), timeout);
