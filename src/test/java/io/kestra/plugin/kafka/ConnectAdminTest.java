@@ -380,7 +380,7 @@ class ConnectAdminTest {
             }
             assertThat(offsetsOutput.getOffsets(), not(empty()));
 
-            ConnectorStop.Output stopOutput = ConnectorStop.builder()
+            var stopOutput = ConnectorStop.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(connectorName))
                 .build()
@@ -395,7 +395,7 @@ class ConnectAdminTest {
                 .run(runContext);
             config.forEach((key, value) -> assertThat(stoppedConfig.getConfig().get(key), is(value)));
 
-            ConnectorAlterOffsets.Output alterOutput = ConnectorAlterOffsets.builder()
+            var alterOutput = ConnectorAlterOffsets.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(connectorName))
                 .offsets(Property.ofValue(offsetsOutput.getOffsets()))
@@ -403,14 +403,14 @@ class ConnectAdminTest {
                 .run(runContext);
             assertThat(alterOutput.getConnectorName(), is(connectorName));
 
-            ConnectorResetOffsets.Output resetOutput = ConnectorResetOffsets.builder()
+            var resetOutput = ConnectorResetOffsets.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(connectorName))
                 .build()
                 .run(runContext);
             assertThat(resetOutput.getConnectorName(), is(connectorName));
 
-            ConnectorResume.Output resumeOutput = ConnectorResume.builder()
+            var resumeOutput = ConnectorResume.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(connectorName))
                 .build()

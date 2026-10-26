@@ -22,7 +22,13 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Stop a Kafka Connect connector",
-    description = "Stops the connector and shuts down its tasks while preserving its configuration and offsets. Requires Kafka Connect 3.5+. This operation is asynchronous; poll `ConnectorGetStatus` to confirm the `STOPPED` state before using `ConnectorAlterOffsets` or `ConnectorResetOffsets`. Use `ConnectorResume` to restart processing."
+    description = """
+        Stops the connector and shuts down its tasks while preserving its configuration and offsets.
+        Requires Kafka Connect 3.5+.
+        This operation is asynchronous; poll `ConnectorGetStatus` to confirm the `STOPPED` state
+        before using `ConnectorAlterOffsets` or `ConnectorResetOffsets`.
+        Use `ConnectorResume` to restart processing.
+        """
 )
 @Plugin(
     examples = {
@@ -53,7 +59,19 @@ public class ConnectorStop extends AbstractKafkaConnectTask implements RunnableT
         var rConnectorName = requireRendered(runContext, this.connectorName, String.class, "connectorName");
 
         var request = requestBuilder(runContext, "PUT", "/connectors/" + encodePathSegment(rConnectorName) + "/stop").build();
-        execute(runContext, request, rConnectorName);
+        try {
+            execute(runContext, request, rConnectorName);
+        } catch (KafkaConnectApiException e) {
+            if (e.getStatusCode() != 404) {
+                throw e;
+            }
+            throw new KafkaConnectApiException(
+                "Cannot stop connector '%s': the connector was not found or the Kafka Connect cluster is older than 3.5 and has no stop endpoint. Check the connector name and upgrade Kafka Connect to 3.5 or later if needed.".formatted(rConnectorName),
+                e.getStatusCode(),
+                e.getResponseBody(),
+                e
+            );
+        }
 
         return Output.builder().connectorName(rConnectorName).build();
     }

@@ -3,7 +3,6 @@ package io.kestra.plugin.kafka;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
@@ -41,11 +40,11 @@ class ConnectorStopTest {
 
     @Test
     void shouldAcceptEmptyResponseWithoutAuthentication() throws Exception {
-        RunContext runContext = runContextFactory.of(Map.of());
+        var runContext = runContextFactory.of(Map.of());
         connect.stubFor(put(urlEqualTo("/connectors/orders/stop"))
             .willReturn(aResponse().withStatus(202)));
 
-        ConnectorStop.Output output = ConnectorStop.builder()
+        var output = ConnectorStop.builder()
             .connectUrl(Property.ofValue(connect.baseUrl()))
             .connectorName(Property.ofValue("orders"))
             .build()
@@ -58,14 +57,14 @@ class ConnectorStopTest {
 
     @Test
     void shouldRenderAndEncodeConnectorNameWithAuthenticationAndHeaders() throws Exception {
-        String connectorName = "orders / east";
-        RunContext runContext = runContextFactory.of(Map.of("vars", Map.of("connectorName", connectorName)));
+        var connectorName = "orders / east";
+        var runContext = runContextFactory.of(Map.of("vars", Map.of("connectorName", connectorName)));
         connect.stubFor(put(urlEqualTo("/connectors/orders%20%2F%20east/stop"))
             .withBasicAuth("alice", "secret")
             .withHeader("X-Connect-Cluster", equalTo("east"))
             .willReturn(aResponse().withStatus(204)));
 
-        ConnectorStop.Output output = ConnectorStop.builder()
+        var output = ConnectorStop.builder()
             .connectUrl(Property.ofValue(connect.baseUrl() + "/"))
             .connectorName(Property.ofExpression("{{ vars.connectorName }}"))
             .username(Property.ofValue("alice"))
@@ -81,19 +80,23 @@ class ConnectorStopTest {
     @ParameterizedTest
     @ValueSource(ints = {404, 409, 500})
     void shouldSurfaceConnectErrors(int status) {
-        RunContext runContext = runContextFactory.of(Map.of());
-        String body = "{\"error_code\":" + status + ",\"message\":\"Cannot stop orders\"}";
+        var runContext = runContextFactory.of(Map.of());
+        var body = "{\"error_code\":" + status + ",\"message\":\"Cannot stop orders\"}";
         connect.stubFor(put(urlEqualTo("/connectors/orders/stop"))
             .willReturn(aResponse().withStatus(status).withBody(body)));
 
-        ConnectorStop task = ConnectorStop.builder()
+        var task = ConnectorStop.builder()
             .connectUrl(Property.ofValue(connect.baseUrl()))
             .connectorName(Property.ofValue("orders"))
             .build();
 
-        KafkaConnectApiException exception = assertThrows(KafkaConnectApiException.class, () -> task.run(runContext));
+        var exception = assertThrows(KafkaConnectApiException.class, () -> task.run(runContext));
         assertThat(exception.getStatusCode(), is(status));
         assertThat(exception.getResponseBody(), is(body));
         assertThat(exception.getMessage(), containsString("orders"));
+        if (status == 404) {
+            assertThat(exception.getMessage(), containsString("upgrade Kafka Connect to 3.5 or later"));
+            assertThat(exception.getCause() instanceof KafkaConnectApiException, is(true));
+        }
     }
 }

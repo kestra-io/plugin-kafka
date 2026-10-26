@@ -22,7 +22,10 @@ import lombok.experimental.SuperBuilder;
 @NoArgsConstructor
 @Schema(
     title = "Resume a paused or stopped Kafka Connect connector",
-    description = "Restarts processing on a connector previously paused with `ConnectorPause` or stopped with `ConnectorStop`. This operation is asynchronous; poll `ConnectorGetStatus` to confirm the `RUNNING` state has taken effect."
+    description = """
+        Restarts processing on a connector previously paused with `ConnectorPause` or stopped with `ConnectorStop`.
+        This operation is asynchronous; poll `ConnectorGetStatus` to confirm the `RUNNING` state has taken effect.
+        """
 )
 @Plugin(
     examples = {
