@@ -5,6 +5,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
 import jakarta.inject.Inject;
 import org.apache.kafka.common.errors.TopicExistsException;
@@ -40,12 +41,20 @@ class TopicAdminTest {
      */
     private static <T> T awaitCondition(Callable<T> action, Predicate<T> condition, long timeoutMs) throws Exception {
         long deadline = System.currentTimeMillis() + timeoutMs;
-        T result = action.call();
-        while (!condition.test(result) && System.currentTimeMillis() < deadline) {
+        while (true) {
+            try {
+                T result = action.call();
+                if (condition.test(result) || System.currentTimeMillis() >= deadline) {
+                    return result;
+                }
+            } catch (UnknownTopicOrPartitionException e) {
+                // topic metadata not yet propagated right after create
+                if (System.currentTimeMillis() >= deadline) {
+                    throw e;
+                }
+            }
             Thread.sleep(500);
-            result = action.call();
         }
-        return result;
     }
 
     @Test
@@ -92,6 +101,60 @@ class TopicAdminTest {
     }
 
     @Test
+    void shouldDescribeTopicWithOffsets() throws Exception {
+        var runContext = runContextFactory.of(Map.of());
+        var topic = "tu_admin_offsets_%s".formatted(IdUtils.create());
+
+        TopicCreate.builder()
+            .properties(connection())
+            .topic(Property.ofValue(topic))
+            .partitions(Property.ofValue(1))
+            .replicationFactor(Property.ofValue(1))
+            .build()
+            .run(runContext);
+
+        try {
+            var produce = Produce.builder()
+                .properties(connection())
+                // A transaction commit marker would take an offset of its own
+                .transactional(Property.ofValue(false))
+                .keySerializer(Property.ofValue(SerdeType.STRING))
+                .valueSerializer(Property.ofValue(SerdeType.STRING))
+                .topic(Property.ofValue(topic))
+                .from(List.of(
+                    Map.of("key", "k1", "value", "v1"),
+                    Map.of("key", "k2", "value", "v2"),
+                    Map.of("key", "k3", "value", "v3")
+                ))
+                .build();
+            var produceOutput = produce.run(runContext);
+            assertThat(produceOutput.getMessagesCount(), is(3));
+
+            var describeWithoutOffsets = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();
+            var plainOutput = describeWithoutOffsets.run(runContext);
+            assertThat(plainOutput.getPartitions(), hasSize(1));
+            assertThat(plainOutput.getPartitions().getFirst().keySet(), contains("partition", "leader", "replicas", "isr"));
+
+            var describeWithOffsets = TopicDescribe.builder()
+                .properties(connection())
+                .topic(Property.ofValue(topic))
+                .includeOffsets(Property.ofValue(true))
+                .build();
+            var offsetsOutput = awaitCondition(
+                () -> describeWithOffsets.run(runContext),
+                output -> Long.valueOf(3L).equals(output.getPartitions().getFirst().get("latestOffset")),
+                10_000
+            );
+            var partition = offsetsOutput.getPartitions().getFirst();
+            assertThat(partition.get("partition"), is(0));
+            assertThat(partition.get("earliestOffset"), is(0L));
+            assertThat(partition.get("latestOffset"), is(3L));
+        } finally {
+            TopicDelete.builder().properties(connection()).topics(Property.ofValue(List.of(topic))).build().run(runContext);
+        }
+    }
+
+    @Test
     void shouldUpdateTopicRetention() throws Exception {
         RunContext runContext = runContextFactory.of(Map.of());
         String topic = "tu_admin_" + IdUtils.create();
@@ -108,7 +171,7 @@ class TopicAdminTest {
             .topic(Property.ofValue(topic))
             .retentionMs(Property.ofValue(3600000L))
             .build();
-        TopicUpdate.Output updateOutput = update.run(runContext);
+        TopicUpdate.Output updateOutput = awaitCondition(() -> update.run(runContext), output -> true, 10_000);
         assertThat(updateOutput.getUpdatedConfigs().get("retention.ms"), is("3600000"));
 
         TopicDescribe describe = TopicDescribe.builder().properties(connection()).topic(Property.ofValue(topic)).build();

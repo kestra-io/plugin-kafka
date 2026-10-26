@@ -54,7 +54,7 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
 
     // libs included in the final jar
-    api group: "org.apache.kafka", name: "kafka-clients", version: "4.3.1" // we don't want to be linked to the platform BOM here (Kestra EE uses Kafka internally)
+    api group: "org.apache.kafka", name: "kafka-clients", version: "4.3.2" // we don't want to be linked to the platform BOM here (Kestra EE uses Kafka internally)
     api group: "io.confluent", name: "kafka-schema-registry-client", version: confluentVersion
     api group: "io.confluent", name: "kafka-avro-serializer", version: confluentVersion
     api group: "io.confluent", name: "kafka-protobuf-serializer", version: confluentVersion
@@ -70,7 +70,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
     api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.9'
 
-    implementation 'software.amazon.glue:schema-registry-serde:2.0.0'
+    implementation 'software.amazon.glue:schema-registry-serde:2.0.1'
 }
 
 
@@ -106,7 +106,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
     testImplementation group: "io.kestra", name: "scheduler", version: kestraVersion
     testImplementation group: "io.kestra", name: "worker", version: kestraVersion
-    testImplementation "io.kestra.plugin:plugin-docker:1.6.2"
+    testImplementation "io.kestra.plugin:plugin-docker:1.7.0"
     testRuntimeOnly ('com.github.docker-java:docker-java') {
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-netty'
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-jersey'

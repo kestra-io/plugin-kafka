@@ -20,11 +20,9 @@ import org.apache.kafka.clients.admin.MemberDescription;
 import org.apache.kafka.clients.admin.OffsetSpec;
 import org.apache.kafka.common.TopicPartition;
 
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @SuperBuilder
@@ -82,7 +80,7 @@ public class ConsumerGroupDescribe extends AbstractKafkaAdminTask implements Run
             var allPartitions = committedOffsetsByGroup.values().stream()
                 .flatMap(offsets -> offsets.keySet().stream())
                 .collect(Collectors.toSet());
-            var endOffsets = fetchEndOffsets(admin, allPartitions, timeout);
+            var endOffsets = listOffsets(admin, allPartitions, OffsetSpec.latest(), timeout);
 
             var groups = rGroupIds.stream()
                 .map(groupId -> {
@@ -108,16 +106,6 @@ public class ConsumerGroupDescribe extends AbstractKafkaAdminTask implements Run
 
             return Output.builder().groups(groups).build();
         }
-    }
-
-    private static Map<TopicPartition, Long> fetchEndOffsets(AdminClient admin, Set<TopicPartition> partitions, Duration timeout) throws Exception {
-        if (partitions.isEmpty()) {
-            return Map.of();
-        }
-        var offsetSpecs = partitions.stream().collect(Collectors.toMap(tp -> tp, tp -> OffsetSpec.latest()));
-        var results = get(admin.listOffsets(offsetSpecs).all(), timeout);
-        return results.entrySet().stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().offset()));
     }
 
     private static Map<String, Object> offsetEntry(TopicPartition tp, long committedOffset, Map<TopicPartition, Long> endOffsets) {
