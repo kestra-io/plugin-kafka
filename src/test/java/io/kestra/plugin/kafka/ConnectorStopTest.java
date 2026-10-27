@@ -96,6 +96,7 @@ class ConnectorStopTest {
         assertThat(exception.getMessage(), containsString("orders"));
         if (status == 404) {
             assertThat(exception.getMessage(), containsString("upgrade Kafka Connect to 3.5 or later"));
+            assertThat(exception.getMessage(), containsString(connect.baseUrl()));
             assertThat(exception.getCause() instanceof KafkaConnectApiException, is(true));
         }
     }

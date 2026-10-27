@@ -66,7 +66,7 @@ public class ConnectorStop extends AbstractKafkaConnectTask implements RunnableT
                 throw e;
             }
             throw new KafkaConnectApiException(
-                "Cannot stop connector '%s': the connector was not found or the Kafka Connect cluster is older than 3.5 and has no stop endpoint. Check the connector name and upgrade Kafka Connect to 3.5 or later if needed.".formatted(rConnectorName),
+                "Cannot stop connector '%s' on the Kafka Connect worker at %s: the connector was not found or the Kafka Connect cluster is older than 3.5 and has no stop endpoint. Check the connector name and upgrade Kafka Connect to 3.5 or later if needed.".formatted(rConnectorName, renderConnectUrl(runContext)),
                 e.getStatusCode(),
                 e.getResponseBody(),
                 e
