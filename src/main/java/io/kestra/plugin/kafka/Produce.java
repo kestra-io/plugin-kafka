@@ -310,9 +310,17 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             producer.partitionsFor(topic);
         }
 
+        Object partitionObj = map.get("partition");
+        Integer partition = null;
+        if (partitionObj instanceof Number n) {
+            partition = n.intValue();
+        } else if (partitionObj instanceof String s) {
+            partition = Integer.valueOf(s);
+        }
+
         return new ProducerRecord<>(
             topic,
-            (Integer) map.get("partition"),
+            partition,
             this.processTimestamp(map.get("timestamp")),
             key,
             value,
@@ -361,16 +369,24 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             return ((Map<?, ?>) headers)
                 .entrySet()
                 .stream()
-                .map(o -> new RecordHeader((String) o.getKey(), ((String) o.getValue()).getBytes(StandardCharsets.UTF_8)))
+                .map(o -> {
+                    byte[] val = o.getValue() == null ? null : String.valueOf(o.getValue()).getBytes(StandardCharsets.UTF_8);
+                    return new RecordHeader(String.valueOf(o.getKey()), val);
+                })
                 .collect(Collectors.toList());
         }
 
         // a message coming from a Consume task will have headers as a list of Map
         if (headers instanceof List) {
-            return ((List<Map<String, String>>) headers)
+            return ((List<Map<String, Object>>) headers)
                 .stream()
-                .map(map -> map.entrySet().stream().findAny().get()) // there is only one entry
-                .map(o -> new RecordHeader(o.getKey(), o.getValue().getBytes(StandardCharsets.UTF_8)))
+                .filter(map -> map != null && !map.isEmpty()) // Prevent NoSuchElementException
+                .map(map -> map.entrySet().stream().findFirst().orElse(null))
+                .filter(o -> o != null)
+                .map(o -> {
+                    byte[] val = o.getValue() == null ? null : String.valueOf(o.getValue()).getBytes(StandardCharsets.UTF_8);
+                    return new RecordHeader(o.getKey(), val);
+                })
                 .collect(Collectors.toList());
         }
 
