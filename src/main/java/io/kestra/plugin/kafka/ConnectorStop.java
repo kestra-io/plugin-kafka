@@ -65,11 +65,11 @@ public class ConnectorStop extends AbstractKafkaConnectTask implements RunnableT
             if (e.getStatusCode() != 404) {
                 throw e;
             }
+            // No cause: the shared 404 message says "not found", which is wrong on a pre-3.5 worker and would be logged too.
             throw new KafkaConnectApiException(
                 "Cannot stop connector '%s' on the Kafka Connect worker at %s: the connector was not found or the Kafka Connect cluster is older than 3.5 and has no stop endpoint. Check the connector name and upgrade Kafka Connect to 3.5 or later if needed.".formatted(rConnectorName, renderConnectUrl(runContext)),
                 e.getStatusCode(),
-                e.getResponseBody(),
-                e
+                e.getResponseBody()
             );
         }
 

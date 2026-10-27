@@ -17,6 +17,8 @@ import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
@@ -97,7 +99,8 @@ class ConnectorStopTest {
         if (status == 404) {
             assertThat(exception.getMessage(), containsString("upgrade Kafka Connect to 3.5 or later"));
             assertThat(exception.getMessage(), containsString(connect.baseUrl()));
-            assertThat(exception.getCause() instanceof KafkaConnectApiException, is(true));
+            assertThat(exception.getCause(), is(nullValue()));
+            assertThat(exception.getMessage(), not(containsString("hasn't already been deleted")));
         }
     }
 }
