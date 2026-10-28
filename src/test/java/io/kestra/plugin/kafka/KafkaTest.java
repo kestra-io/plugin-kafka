@@ -1080,4 +1080,52 @@ public class KafkaTest {
             .put("timestamp", Instant.now().toEpochMilli())
             .build();
     }
+
+    @Test
+    void produceEdgeCases() throws Exception {
+        RunContext runContext = runContextFactory.of();
+        String topic = "edge-cases-" + io.kestra.core.utils.IdUtils.create();
+
+        // 1. Assert Failure on Out-of-Range and Non-Numeric Partitions
+        Produce failTask = Produce.builder()
+            .id(io.kestra.core.utils.IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(io.kestra.core.models.property.Property.ofValue(java.util.Map.of("bootstrap.servers", "localhost:9092"))) 
+            .topic(io.kestra.core.models.property.Property.ofValue(topic))
+            .from(java.util.Map.of("value", "v", "partition", 4294967296L))
+            .build();
+            
+        IllegalArgumentException ex1 = org.junit.jupiter.api.Assertions.assertThrows(
+            IllegalArgumentException.class, 
+            () -> failTask.run(runContext)
+        );
+        org.junit.jupiter.api.Assertions.assertTrue(ex1.getMessage().contains("expected a non-negative integer"));
+
+        // 2. Success Cases: Long partition, String partition, Null header, Empty list map
+        Produce successTask = Produce.builder()
+            .id(io.kestra.core.utils.IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(io.kestra.core.models.property.Property.ofValue(java.util.Map.of("bootstrap.servers", "localhost:9092")))
+            .topic(io.kestra.core.models.property.Property.ofValue(topic))
+            .from(java.util.List.of(
+                java.util.Map.of("value", "v1", "partition", 0L, "headers", java.util.Map.of("null-head", null)),
+                java.util.Map.of("value", "v2", "partition", "0", "headers", java.util.List.of(java.util.Collections.emptyMap(), java.util.Map.of("valid-head", "val")))
+            ))
+            .build();
+            
+        successTask.run(runContext);
+
+        // 3. Consume back to verify
+        Consume consumeTask = Consume.builder()
+            .id(io.kestra.core.utils.IdUtils.create())
+            .type(Consume.class.getName())
+            .properties(io.kestra.core.models.property.Property.ofValue(java.util.Map.of("bootstrap.servers", "localhost:9092")))
+            .topic(io.kestra.core.models.property.Property.ofValue(java.util.List.of(topic)))
+            .groupId(io.kestra.core.models.property.Property.ofValue(io.kestra.core.utils.IdUtils.create()))
+            .maxRecords(io.kestra.core.models.property.Property.ofValue(2))
+            .build();
+            
+        Consume.Output consumeOutput = consumeTask.run(runContext);
+        org.junit.jupiter.api.Assertions.assertEquals(2, consumeOutput.getMessagesCount());
+    }
 }

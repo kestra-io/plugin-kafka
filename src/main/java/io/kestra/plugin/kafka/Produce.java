@@ -310,17 +310,9 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             producer.partitionsFor(topic);
         }
 
-        Object partitionObj = map.get("partition");
-        Integer partition = null;
-        if (partitionObj instanceof Number n) {
-            partition = n.intValue();
-        } else if (partitionObj instanceof String s) {
-            partition = Integer.valueOf(s);
-        }
-
         return new ProducerRecord<>(
             topic,
-            partition,
+            this.processPartition(map.get("partition")),
             this.processTimestamp(map.get("timestamp")),
             key,
             value,
@@ -360,33 +352,59 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         throw new IllegalArgumentException("Invalid type of timestamp with type '" + timestamp.getClass() + "'");
     }
 
+    private Integer processPartition(Object partitionObj) {
+        if (partitionObj == null) {
+            return null;
+        }
+        try {
+            if (partitionObj instanceof Integer i) {
+                return i;
+            }
+            if (partitionObj instanceof Long l) {
+                return Math.toIntExact(l);
+            }
+            if (partitionObj instanceof Short s) {
+                return s.intValue();
+            }
+            if (partitionObj instanceof Byte b) {
+                return b.intValue();
+            }
+            if (partitionObj instanceof java.math.BigInteger b) {
+                return b.intValueExact();
+            }
+            if (partitionObj instanceof String s) {
+                return Integer.parseInt(s.trim());
+            }
+        } catch (ArithmeticException | NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid partition '" + partitionObj + "': expected a non-negative integer", e);
+        }
+        throw new IllegalArgumentException("Invalid partition '" + partitionObj + "': expected a non-negative integer");
+    }
+
+    private RecordHeader toHeader(Object key, Object value) {
+        if (value instanceof Map || value instanceof java.util.Collection) {
+            throw new IllegalArgumentException("Invalid header value for key '" + key + "': cannot be a Map or Collection");
+        }
+        var valBytes = value == null ? null : String.valueOf(value).getBytes(StandardCharsets.UTF_8);
+        return new RecordHeader(String.valueOf(key), valBytes);
+    }
+
     private Iterable<Header> processHeaders(Object headers) {
         if (headers == null) {
             return null;
         }
 
-        if (headers instanceof Map) {
-            return ((Map<?, ?>) headers)
-                .entrySet()
-                .stream()
-                .map(o -> {
-                    byte[] val = o.getValue() == null ? null : String.valueOf(o.getValue()).getBytes(StandardCharsets.UTF_8);
-                    return new RecordHeader(String.valueOf(o.getKey()), val);
-                })
+        if (headers instanceof Map<?, ?> mapHeaders) {
+            return mapHeaders.entrySet().stream()
+                .map(e -> toHeader(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
         }
 
-        // a message coming from a Consume task will have headers as a list of Map
         if (headers instanceof List) {
-            return ((List<Map<String, Object>>) headers)
-                .stream()
-                .filter(map -> map != null && !map.isEmpty()) // Prevent NoSuchElementException
-                .map(map -> map.entrySet().stream().findFirst().orElse(null))
-                .filter(o -> o != null)
-                .map(o -> {
-                    byte[] val = o.getValue() == null ? null : String.valueOf(o.getValue()).getBytes(StandardCharsets.UTF_8);
-                    return new RecordHeader(o.getKey(), val);
-                })
+            return ((List<Map<?, ?>>) headers).stream()
+                .filter(java.util.Objects::nonNull)
+                .flatMap(m -> m.entrySet().stream())
+                .map(e -> toHeader(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
         }
 
