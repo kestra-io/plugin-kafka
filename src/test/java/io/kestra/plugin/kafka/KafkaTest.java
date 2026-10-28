@@ -13,6 +13,8 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.registry.AwsGlueSchemaRegistry;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
+import io.kestra.core.utils.IdUtils;
+import io.kestra.core.models.property.Property;
 import jakarta.inject.Inject;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -42,6 +44,9 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @KestraTest
 public class KafkaTest {
@@ -1083,49 +1088,63 @@ public class KafkaTest {
 
     @Test
     void produceEdgeCases() throws Exception {
-        RunContext runContext = runContextFactory.of();
-        String topic = "edge-cases-" + io.kestra.core.utils.IdUtils.create();
+        var runContext = runContextFactory.of();
+        var topic = "edge-cases-" + IdUtils.create();
 
-        // 1. Assert Failure on Out-of-Range and Non-Numeric Partitions
-        Produce failTask = Produce.builder()
-            .id(io.kestra.core.utils.IdUtils.create())
+        var failTask = Produce.builder()
+            .id(IdUtils.create())
             .type(Produce.class.getName())
-            .properties(io.kestra.core.models.property.Property.ofValue(java.util.Map.of("bootstrap.servers", "localhost:9092"))) 
-            .topic(io.kestra.core.models.property.Property.ofValue(topic))
-            .from(java.util.Map.of("value", "v", "partition", 4294967296L))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .topic(Property.ofValue(topic))
+            .from(Map.of("value", "v", "partition", 4294967296L))
             .build();
             
-        IllegalArgumentException ex1 = org.junit.jupiter.api.Assertions.assertThrows(
+        var ex1 = assertThrows(
             IllegalArgumentException.class, 
             () -> failTask.run(runContext)
         );
-        org.junit.jupiter.api.Assertions.assertTrue(ex1.getMessage().contains("expected a non-negative integer"));
+        assertTrue(ex1.getMessage().contains("expected a non-negative integer"));
 
-        // 2. Success Cases: Long partition, String partition, Null header, Empty list map
-        Produce successTask = Produce.builder()
-            .id(io.kestra.core.utils.IdUtils.create())
+        var failTaskNonNumeric = Produce.builder()
+            .id(IdUtils.create())
             .type(Produce.class.getName())
-            .properties(io.kestra.core.models.property.Property.ofValue(java.util.Map.of("bootstrap.servers", "localhost:9092")))
-            .topic(io.kestra.core.models.property.Property.ofValue(topic))
-            .from(java.util.List.of(
-                java.util.Map.of("value", "v1", "partition", 0L, "headers", java.util.Map.of("null-head", null)),
-                java.util.Map.of("value", "v2", "partition", "0", "headers", java.util.List.of(java.util.Collections.emptyMap(), java.util.Map.of("valid-head", "val")))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .topic(Property.ofValue(topic))
+            .from(Map.of("value", "v", "partition", "invalid-string"))
+            .build();
+            
+        var ex2 = assertThrows(
+            IllegalArgumentException.class, 
+            () -> failTaskNonNumeric.run(runContext)
+        );
+        assertTrue(ex2.getMessage().contains("expected a non-negative integer"));
+
+        var nullHeaderMap = new HashMap<String, Object>();
+        nullHeaderMap.put("null-head", null);
+
+        var successTask = Produce.builder()
+            .id(IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .topic(Property.ofValue(topic))
+            .from(List.of(
+                Map.of("value", "v1", "partition", 0L, "headers", nullHeaderMap),
+                Map.of("value", "v2", "partition", "0", "headers", List.of(Collections.emptyMap(), Map.of("valid-head", "val")))
             ))
             .build();
             
         successTask.run(runContext);
 
-        // 3. Consume back to verify
-        Consume consumeTask = Consume.builder()
-            .id(io.kestra.core.utils.IdUtils.create())
+        var consumeTask = Consume.builder()
+            .id(IdUtils.create())
             .type(Consume.class.getName())
-            .properties(io.kestra.core.models.property.Property.ofValue(java.util.Map.of("bootstrap.servers", "localhost:9092")))
-            .topic(io.kestra.core.models.property.Property.ofValue(java.util.List.of(topic)))
-            .groupId(io.kestra.core.models.property.Property.ofValue(io.kestra.core.utils.IdUtils.create()))
-            .maxRecords(io.kestra.core.models.property.Property.ofValue(2))
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .topic(Property.ofValue(List.of(topic)))
+            .groupId(Property.ofValue(IdUtils.create()))
+            .maxRecords(Property.ofValue(2))
             .build();
             
-        Consume.Output consumeOutput = consumeTask.run(runContext);
-        org.junit.jupiter.api.Assertions.assertEquals(2, consumeOutput.getMessagesCount());
+        var consumeOutput = consumeTask.run(runContext);
+        assertEquals(2, consumeOutput.getMessagesCount());
     }
 }
