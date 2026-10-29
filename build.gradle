@@ -71,6 +71,8 @@ dependencies {
     api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.9'
 
     implementation 'software.amazon.glue:schema-registry-serde:2.0.1'
+    // CVE-2022-36944: schema-registry-serde pulls scala-library 2.13.1 (via mbknor-jackson-jsonschema_2.13) and the Kestra platform does not pin it
+    implementation 'org.scala-lang:scala-library:2.13.18'
 }
 
 
