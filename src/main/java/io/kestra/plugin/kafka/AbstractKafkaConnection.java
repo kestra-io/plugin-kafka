@@ -82,7 +82,7 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
                     try {
                         return super.deserialize(ignored, bytes);
                     }  catch (SerializationException e) {
-                        throw new PluginKafkaSerdeException(e, new String(bytes));
+                        throw new PluginKafkaSerdeException(e, bytes);
                     }
                 }
             };
@@ -92,11 +92,36 @@ public abstract class AbstractKafkaConnection extends Task implements KafkaConne
 
     @Getter
     protected static class PluginKafkaSerdeException extends SerializationException {
-        private final String data;
+        private final byte[] data;
 
-        public PluginKafkaSerdeException(SerializationException e, String data) {
+        public PluginKafkaSerdeException(SerializationException e, byte[] data) {
             super(e);
             this.data = data;
         }
+    }
+
+    protected static Deserializer<Object> captureSerdeErrors(Deserializer<Object> delegate) {
+        return new Deserializer<>() {
+            @Override
+            public Object deserialize(String topic, byte[] data) {
+                try {
+                    return delegate.deserialize(topic, data);
+                } catch (SerializationException e) {
+                    return e instanceof PluginKafkaSerdeException err
+                        ? err
+                        : new PluginKafkaSerdeException(e, data);
+                }
+            }
+
+            @Override
+            public void configure(Map<String, ?> configs, boolean isKey) {
+                delegate.configure(configs, isKey);
+            }
+
+            @Override
+            public void close() {
+                delegate.close();
+            }
+        };
     }
 }

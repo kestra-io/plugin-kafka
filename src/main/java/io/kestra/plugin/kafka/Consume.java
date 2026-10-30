@@ -22,12 +22,17 @@ import lombok.*;
 import lombok.experimental.SuperBuilder;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.clients.consumer.*;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.IsolationLevel;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.header.Headers;
+import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.Deserializer;
+import org.apache.kafka.common.serialization.Serializer;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.LoggerFactory;
 
@@ -364,6 +369,15 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public KafkaConsumer<Object, Object> consumer(RunContext runContext) throws Exception {
+        return buildConsumer(runContext, false);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public KafkaConsumer<Object, Object> consumerWithSerdeErrorCapture(RunContext runContext) throws Exception {
+        return buildConsumer(runContext, true);
+    }
+
+    private KafkaConsumer<Object, Object> buildConsumer(RunContext runContext, boolean captureSerdeErrors) throws Exception {
         Thread.currentThread().setContextClassLoader(this.getClass().getClassLoader());
 
         final Properties consumerProps = createProperties(this.properties, runContext);
@@ -394,6 +408,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         if (schemaRegistryVendor != null) {
             valueDeserializer = (Deserializer<Object>) schemaRegistryVendor.getDeserializer(runContext, valueSerdeType);
+        }
+        if (captureSerdeErrors) {
+            valueDeserializer = captureSerdeErrors(valueDeserializer);
         }
 
         var serdesMap = serdesProperties.entrySet()
@@ -597,7 +614,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                             total.addAndGet(processConsumerRecords(runContext, records, deduplicate, lastOffsets, consumerRecord -> {
                                 FileSerde.write(output, this.recordToMessage(consumerRecord));
                                 count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
-                            }));
+                            }, null));
                         }
                         while (!this.ended(runContext, empty, total, started));
                     } catch (WakeupException e) {
@@ -707,37 +724,95 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             throw e;
         }
 
-        var onSerdeErrorBehavior = runContext.render(this.onSerdeError.getType()).as(OnSerdeErrorBehavior.class).orElseThrow();
+        var rBehavior = runContext.render(this.onSerdeError.getType()).as(OnSerdeErrorBehavior.class).orElse(OnSerdeErrorBehavior.SKIPPED);
         runContext.logger().warn("Skipping consume on serde error: '{}'", e.getMessage());
 
-        return switch (onSerdeErrorBehavior) {
+        return switch (rBehavior) {
             case SKIPPED -> Output.builder().build();
             case STORE -> {
-                Files.writeString(tempFile.toPath(), err.getData(), StandardCharsets.UTF_8);
+                Files.write(tempFile.toPath(), err.getData());
                 yield Output.builder()
                     .uri(runContext.storage().putFile(tempFile))
                     .build();
             }
             case DLQ -> {
-                Produce.builder()
-                    .topic(onSerdeError.getTopic())
-                    .properties(this.getProperties())
-                    .serdeProperties(this.getSerdeProperties())
-                    .keySerializer(this.getKeyDeserializer())
-                    .valueSerializer(this.getValueDeserializer())
-                    .from(err.getData())
-                    .build()
-                    .run(runContext);
+                sendToDlq(runContext, null, err.getData(), null, null, null);
                 yield Output.builder().build();
             }
         };
+    }
+
+    Object handleCapturedSerdeError(RunContext runContext, PluginKafkaSerdeException err, ConsumerRecord<Object, Object> record, KafkaProducer<byte[], byte[]> dlqProducer) throws Exception {
+        if (onSerdeError == null) {
+            throw err;
+        }
+
+        var rBehavior = runContext.render(this.onSerdeError.getType()).as(OnSerdeErrorBehavior.class).orElse(OnSerdeErrorBehavior.SKIPPED);
+        runContext.logger().warn("Realtime trigger serde error: '{}'", err.getMessage());
+
+        return switch (rBehavior) {
+            case SKIPPED -> null;
+            case STORE -> {
+                var tempFile = runContext.workingDir().createTempFile(".bin").toFile();
+                try {
+                    Files.write(tempFile.toPath(), err.getData());
+                    yield runContext.storage().putFile(tempFile);
+                } finally {
+                    Files.deleteIfExists(tempFile.toPath());
+                }
+            }
+            case DLQ -> {
+                sendToDlq(runContext, serializeKey(runContext, record.key()), err.getData(), record.headers(), record.timestamp(), dlqProducer);
+                yield null;
+            }
+        };
+    }
+
+    private void sendToDlq(RunContext runContext, byte[] key, byte[] value, Headers headers, Long timestamp, KafkaProducer<byte[], byte[]> producer) throws Exception {
+        var rTopic = runContext.render(onSerdeError.getTopic()).as(String.class).orElse(null);
+        if (rTopic == null) {
+            throw new IllegalStateException("onSerdeError.topic is required when type is DLQ");
+        }
+
+        var record = new ProducerRecord<byte[], byte[]>(rTopic, null, timestamp, key, value, headers);
+        if (producer != null) {
+            producer.send(record).get();
+        } else {
+            try (var p = dlqProducer(runContext)) {
+                p.send(record).get();
+            }
+        }
+    }
+
+    KafkaProducer<byte[], byte[]> dlqProducer(RunContext runContext) throws Exception {
+        var rProducerProps = createProperties(this.properties, runContext);
+        rProducerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        rProducerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
+        return new KafkaProducer<>(rProducerProps);
+    }
+
+    private byte[] serializeKey(RunContext runContext, Object key) {
+        if (key == null) {
+            return null;
+        }
+        try {
+            var keySerdeType = runContext.render(this.keyDeserializer).as(SerdeType.class).orElse(SerdeType.STRING);
+            @SuppressWarnings("unchecked")
+            var serializer = (Serializer<Object>) getTypedSerializer(keySerdeType, null);
+            serializer.configure(new HashMap<>(), true);
+            return serializer.serialize(null, key);
+        } catch (Exception e) {
+            runContext.logger().warn("Could not re-serialize the key for the DLQ; sending a null key: {}", e.getMessage());
+            return null;
+        }
     }
 
     int processConsumerRecords(RunContext runContext,
                                ConsumerRecords<Object, Object> records,
                                boolean deduplicate,
                                 Map<TopicPartition, Long> lastOffsets,
-                               RecordHandler onMatchingRecord) throws Exception {
+                               RecordHandler onMatchingRecord,
+                               KafkaProducer<byte[], byte[]> dlqProducer) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
         var matchedCount = 0;
 
@@ -758,6 +833,27 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 }
 
                 lastOffsets.put(topicPartition, consumerRecord.offset());
+            }
+
+            if (consumerRecord.value() instanceof PluginKafkaSerdeException err) {
+                var recovered = handleCapturedSerdeError(runContext, err, consumerRecord, dlqProducer);
+                if (recovered != null) {
+                    onMatchingRecord.accept(new ConsumerRecord<>(
+                        consumerRecord.topic(),
+                        consumerRecord.partition(),
+                        consumerRecord.offset(),
+                        consumerRecord.timestamp(),
+                        consumerRecord.timestampType(),
+                        consumerRecord.serializedKeySize(),
+                        consumerRecord.serializedValueSize(),
+                        consumerRecord.key(),
+                        recovered,
+                        consumerRecord.headers(),
+                        consumerRecord.leaderEpoch()
+                    ));
+                    matchedCount++;
+                }
+                continue;
             }
 
             onMatchingRecord.accept(consumerRecord);

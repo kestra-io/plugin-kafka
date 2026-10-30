@@ -466,7 +466,8 @@ class ConsumeTest {
             records,
             true,
             new HashMap<>(),
-            matchedRecords::add
+            matchedRecords::add,
+            null
         );
 
         Assertions.assertEquals(2, matchedCount);
@@ -488,7 +489,8 @@ class ConsumeTest {
             records,
             true,
             new HashMap<>(),
-            matchedRecords::add
+            matchedRecords::add,
+            null
         );
 
         Assertions.assertEquals(2, matchedCount);
