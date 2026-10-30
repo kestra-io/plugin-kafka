@@ -736,15 +736,29 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     int processConsumerRecords(RunContext runContext,
                                ConsumerRecords<Object, Object> records,
                                boolean deduplicate,
-                                Map<TopicPartition, Long> lastOffsets,
+                               Map<TopicPartition, Long> lastOffsets,
+                               RecordHandler onMatchingRecord) throws Exception {
+        return processConsumerRecords(
+            runContext, records, deduplicate, lastOffsets,
+            record -> true, onMatchingRecord
+        );
+    }
+
+    int processConsumerRecords(RunContext runContext,
+                               ConsumerRecords<Object, Object> records,
+                               boolean deduplicate,
+                               Map<TopicPartition, Long> lastOffsets,
+                               RecordFilter recordFilter,
                                RecordHandler onMatchingRecord) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
         var matchedCount = 0;
 
         for (var consumerRecord : records) {
-            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)) {
+            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)
+                || !recordFilter.test(consumerRecord)) {
                 continue;
             }
+
             if (deduplicate) {
                 var topicPartition = new TopicPartition(
                     consumerRecord.topic(),
@@ -771,12 +785,24 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                                     ShareConsumer<Object, Object> consumer,
                                     ConsumerRecords<Object, Object> records,
                                     RecordHandler onMatchingRecord) throws Exception {
+        return processShareConsumerRecords(
+            runContext, consumer, records,
+            record -> true, onMatchingRecord
+        );
+    }
+
+    int processShareConsumerRecords(RunContext runContext,
+                                    ShareConsumer<Object, Object> consumer,
+                                    ConsumerRecords<Object, Object> records,
+                                    RecordFilter recordFilter,
+                                    RecordHandler onMatchingRecord) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
         var rAcknowledgeType = resolveAcknowledgeType(runContext).toKafkaType();
         var matchedCount = 0;
 
         for (var consumerRecord : records) {
-            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)) {
+            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)
+                || !recordFilter.test(consumerRecord)) {
                 consumer.acknowledge(consumerRecord, AcknowledgeType.ACCEPT);
                 continue;
             }
@@ -792,6 +818,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     @FunctionalInterface
     interface RecordHandler {
         void accept(ConsumerRecord<Object, Object> consumerRecord) throws Exception;
+    }
+
+    @FunctionalInterface
+    interface RecordFilter {
+        boolean test(ConsumerRecord<Object, Object> consumerRecord) throws Exception;
     }
 
     public Message recordToMessage(ConsumerRecord<Object, Object> consumerRecord) {

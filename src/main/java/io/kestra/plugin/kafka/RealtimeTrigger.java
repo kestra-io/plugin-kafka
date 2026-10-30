@@ -51,7 +51,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Set `since` (e.g. `"{{ now() }}"`) to read only new records when no `groupId` is used. `since` is rendered again at every trigger start, so with `"{{ now() }}"` records produced while the trigger was down (restart, flow update, deploy) are skipped. Use `groupId` if no record can be lost.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
-        Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
+        Use header filters or `recordFilter` to drop unmatched records before creating executions. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
         Emits DEBUG logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
         """
 )
@@ -79,6 +79,7 @@ import java.util.concurrent.atomic.AtomicReference;
                       schema.registry.url: http://localhost:8085
                     keyDeserializer: STRING
                     valueDeserializer: AVRO
+                    recordFilter: "{{ trigger.value.event == 'approved' }}"
                     groupId: kafkaConsumerGroupId"""
         ),
         @Example(
@@ -245,6 +246,18 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     private Property<Map<String, String>> headerFilters;
 
     @Schema(
+        title = "Filter records before creating executions",
+        description = """
+            A Pebble expression evaluated for each Kafka record.
+            The record is available under `trigger`, including its key, value, headers,
+            topic, partition, timestamp, and offset.
+            Records for which the expression evaluates to false are skipped.
+            """
+        )
+    @PluginProperty(group = "processing")
+    private Property<Boolean> recordFilter;
+
+    @Schema(
     title = "Deduplicate records",
     description = """
         When enabled, duplicate records retrieved during the same execution are filtered out
@@ -285,6 +298,25 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
         return Flux.from(publisher(task, runContext))
             .map((record) -> TriggerService.generateRealtimeExecution(this, conditionContext, context, task.recordToMessage(record)));
+    }
+
+    boolean matchesRecord(
+        RunContext runContext,
+        Consume task,
+        ConsumerRecord<Object, Object> record
+    ) throws Exception {
+        if (this.recordFilter == null) {
+            return true;
+        }
+
+        Map<String, Object> variables = Map.of(
+            "trigger",
+            task.recordToMessage(record)
+        );
+
+        return Boolean.TRUE.equals(
+            Property.as(this.recordFilter, runContext, Boolean.class, variables)
+        );
     }
 
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
@@ -376,7 +408,14 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);
-                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next);
+                task.processConsumerRecords(
+                    runContext,
+                    records,
+                    deduplicate,
+                    lastOffsets,
+                    record -> matchesRecord(runContext, task, record),
+                    fluxSink::next
+                );
                 if (hasGroupId) {
                     consumer.commitSync();
                 }
@@ -419,7 +458,13 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
                     logger.debug("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
                 }
-                task.processShareConsumerRecords(runContext, consumer, records, fluxSink::next);
+                task.processShareConsumerRecords(
+                    runContext,
+                    consumer,
+                    records,
+                    record -> matchesRecord(runContext, task, record),
+                    fluxSink::next
+                );
                 consumer.commitSync();
             });
         }

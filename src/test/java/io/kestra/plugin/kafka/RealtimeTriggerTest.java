@@ -96,6 +96,33 @@ class RealtimeTriggerTest {
     }
 
     @Test
+    void shouldFilterRecordsUsingRecordValue() throws Exception {
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .recordFilter(Property.ofExpression(
+                "{{ trigger.value.event == 'approved' }}"
+            ))
+            .build();
+
+        var runContext = runContextFactory.of(Map.of());
+        var task = trigger.consumeTask();
+
+        var approvedRecord = new ConsumerRecord<Object, Object>(
+            "orders", 0, 1L, "key-1",
+            Map.of("event", "approved")
+        );
+
+        var rejectedRecord = new ConsumerRecord<Object, Object>(
+            "orders", 0, 2L, "key-2",
+            Map.of("event", "rejected")
+        );
+
+        assertThat(trigger.matchesRecord(runContext, task, approvedRecord), is(true));
+        assertThat(trigger.matchesRecord(runContext, task, rejectedRecord), is(false));
+    }
+
+    @Test
     void shouldEmitStartupAndSubscriptionLogs() throws Exception {
         var triggerId = IdUtils.create();
         var topic = "tu_logs_" + IdUtils.create();
