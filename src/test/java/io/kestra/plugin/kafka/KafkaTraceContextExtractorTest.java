@@ -7,6 +7,10 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
@@ -100,5 +104,46 @@ class KafkaTraceContextExtractorTest {
         var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", "hello world");
         var extracted = KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, LOGGER);
         assertNull(extracted);
+    }
+
+    @Test
+    @DisplayName("Should never log a raw invalid traceparent (line breaks, huge values)")
+    void shouldNotLogRawInvalidHeaderValue() {
+        var logger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger("trace-context-log-capture");
+        logger.setLevel(Level.DEBUG);
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        logger.addAppender(appender);
+
+        try {
+            var withLineBreaks = "bad\r\n0123456789ABCDEF INJECTED fake log line";
+            var huge = "x".repeat(100_000);
+            for (var value : new String[]{withLineBreaks, huge}) {
+                var record = new ConsumerRecord<>("test-topic", 0, 1L, "key", "value");
+                record.headers().add("traceparent", value.getBytes(StandardCharsets.UTF_8));
+                assertNull(KafkaTraceContextExtractor.extractTraceParent(record, null, "traceparent", null, logger));
+            }
+
+            assertThat(appender.list, hasSize(2));
+            for (var event : appender.list) {
+                var message = event.getFormattedMessage();
+                assertThat(message, not(containsString("\r")));
+                assertThat(message, not(containsString("\n")));
+                assertThat(message, not(containsString("INJECTED")));
+                assertThat(message, not(containsString("x".repeat(17))));
+                assertThat(message, containsString("length="));
+            }
+            assertThat(appender.list.get(1).getFormattedMessage(), containsString("length=100000"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("Should describe untrusted values with length and a sanitized short prefix")
+    void shouldDescribeForLog() {
+        assertThat(KafkaTraceContextExtractor.describeForLog(null), is("null"));
+        assertThat(KafkaTraceContextExtractor.describeForLog("a\r\nb"), is("length=4, prefix='a__b'"));
+        assertThat(KafkaTraceContextExtractor.describeForLog("0123456789abcdefOVERFLOW"), is("length=24, prefix='0123456789abcdef'"));
     }
 }

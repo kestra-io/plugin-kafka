@@ -2,13 +2,10 @@ package io.kestra.plugin.kafka;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.kestra.core.serializers.JacksonMapper;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.header.Header;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -18,6 +15,8 @@ public abstract class KafkaTraceContextExtractor {
         "^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$",
         Pattern.CASE_INSENSITIVE
     );
+
+    private static final int MAX_LOGGED_PREFIX = 16;
 
     public static String extractTraceParent(
         ConsumerRecord<?, ?> record,
@@ -100,7 +99,8 @@ public abstract class KafkaTraceContextExtractor {
             }
         } catch (Exception e) {
             if (logger != null && logger.isDebugEnabled()) {
-                logger.debug("Failed to extract trace context from body at path '{}': {}", path, e.getMessage());
+                // Jackson messages can echo fragments of the (untrusted) body, so never log them raw
+                logger.debug("Failed to extract trace context from body at path '{}': {} ({})", path, e.getClass().getSimpleName(), describeForLog(e.getMessage()));
             }
         }
 
@@ -155,9 +155,26 @@ public abstract class KafkaTraceContextExtractor {
             return candidate;
         } else {
             if (logger != null && logger.isDebugEnabled()) {
-                logger.debug("Ignoring invalid or malformed W3C traceparent '{}' from {}", candidate, sourceDescription);
+                logger.debug("Ignoring invalid or malformed W3C traceparent ({}) from {}", describeForLog(candidate), sourceDescription);
             }
             return null;
         }
+    }
+
+    /**
+     * Describes an untrusted value for logs: its length and a short prefix with control characters
+     * (CR, LF, ...) replaced, so a record writer cannot inject log lines or flood the logs.
+     */
+    static String describeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        var prefix = value.substring(0, Math.min(value.length(), MAX_LOGGED_PREFIX));
+        var sanitized = new StringBuilder(prefix.length());
+        for (int i = 0; i < prefix.length(); i++) {
+            var c = prefix.charAt(i);
+            sanitized.append(Character.isISOControl(c) || Character.isWhitespace(c) && c != ' ' ? '_' : c);
+        }
+        return "length=" + value.length() + ", prefix='" + sanitized + "'";
     }
 }
