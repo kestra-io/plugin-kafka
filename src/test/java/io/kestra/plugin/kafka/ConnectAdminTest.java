@@ -1,7 +1,5 @@
 package io.kestra.plugin.kafka;
 
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -17,7 +15,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -63,8 +60,8 @@ class ConnectAdminTest {
     }
 
     /**
-     * @param requireTasks whether the connector's tasks list must also be non-empty to consider the target
-     *                      state reached — false for {@code STOPPED}, where KIP-980 leaves the tasks list empty.
+     * @param requireTasks whether the connector's tasks list must be non-empty (true) or empty (false) to
+     *                      consider the target state reached. Use false for {@code STOPPED}.
      */
     private ConnectorGetStatus.Output waitForConnectorState(RunContext runContext, String connectorName, String targetState, boolean requireTasks) throws Exception {
         var task = ConnectorGetStatus.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build();
@@ -74,7 +71,7 @@ class ConnectAdminTest {
                 var output = task.run(runContext);
                 // right after create/pause/resume/restart, the status endpoint can briefly 404 or report the
                 // tasks list as still empty before the config change has fully propagated — keep polling
-                if (targetState.equalsIgnoreCase(output.getConnectorState()) && (!requireTasks || !output.getTasks().isEmpty())) {
+                if (targetState.equalsIgnoreCase(output.getConnectorState()) && (requireTasks != output.getTasks().isEmpty())) {
                     return output;
                 }
             } catch (KafkaConnectApiException e) {
@@ -98,22 +95,6 @@ class ConnectAdminTest {
         }
 
         throw new AssertionError("Connector '" + connectorName + "' was not removed in time");
-    }
-
-    /**
-     * Stops a connector via Kafka Connect's KIP-980 {@code PUT /connectors/{name}/stop} endpoint — required for
-     * {@code ConnectorAlterOffsets}/{@code ConnectorResetOffsets} to succeed, but not exposed by any task in this
-     * plugin yet, so it's called directly here using Kestra's internal HTTP client.
-     */
-    private void stopConnector(RunContext runContext, String connectorName) throws Exception {
-        var request = HttpRequest.builder()
-            .uri(URI.create(this.connectUrl + "/connectors/" + connectorName + "/stop"))
-            .method("PUT")
-            .build();
-
-        try (var client = HttpClient.builder().runContext(runContext).build()) {
-            client.request(request, String.class);
-        }
     }
 
     private String waitForFileContent(Path file, String expected) throws Exception {
@@ -399,10 +380,22 @@ class ConnectAdminTest {
             }
             assertThat(offsetsOutput.getOffsets(), not(empty()));
 
-            stopConnector(runContext, connectorName);
-            waitForConnectorState(runContext, connectorName, "STOPPED", false);
+            var stopOutput = ConnectorStop.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(connectorName))
+                .build()
+                .run(runContext);
+            assertThat(stopOutput.getConnectorName(), is(connectorName));
+            var stoppedStatus = waitForConnectorState(runContext, connectorName, "STOPPED", false);
+            assertThat(stoppedStatus.getTasks(), is(empty()));
+            var stoppedConfig = ConnectorGetConfig.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(connectorName))
+                .build()
+                .run(runContext);
+            config.forEach((key, value) -> assertThat(stoppedConfig.getConfig().get(key), is(value)));
 
-            ConnectorAlterOffsets.Output alterOutput = ConnectorAlterOffsets.builder()
+            var alterOutput = ConnectorAlterOffsets.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(connectorName))
                 .offsets(Property.ofValue(offsetsOutput.getOffsets()))
@@ -410,12 +403,20 @@ class ConnectAdminTest {
                 .run(runContext);
             assertThat(alterOutput.getConnectorName(), is(connectorName));
 
-            ConnectorResetOffsets.Output resetOutput = ConnectorResetOffsets.builder()
+            var resetOutput = ConnectorResetOffsets.builder()
                 .connectUrl(connectUrl())
                 .connectorName(Property.ofValue(connectorName))
                 .build()
                 .run(runContext);
             assertThat(resetOutput.getConnectorName(), is(connectorName));
+
+            var resumeOutput = ConnectorResume.builder()
+                .connectUrl(connectUrl())
+                .connectorName(Property.ofValue(connectorName))
+                .build()
+                .run(runContext);
+            assertThat(resumeOutput.getConnectorName(), is(connectorName));
+            waitForState(runContext, connectorName, "RUNNING");
         } finally {
             ConnectorDelete.builder().connectUrl(connectUrl()).connectorName(Property.ofValue(connectorName)).build().run(runContext);
             Files.deleteIfExists(sourceFile);

@@ -23,6 +23,7 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ShareConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.reactivestreams.Publisher;
@@ -404,7 +405,16 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                                  FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
         Logger logger = runContext.logger();
         validateGroupId(runContext);
-        try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
+        var captureSerdeErrors = this.onSerdeError != null;
+        var rBehavior = captureSerdeErrors
+            ? runContext.render(this.onSerdeError.getType()).as(KafkaConsumerInterface.OnSerdeErrorBehavior.class).orElse(KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED)
+            : KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED;
+        try (KafkaConsumer<Object, Object> consumer = captureSerdeErrors
+                ? task.consumerWithSerdeErrorCapture(runContext)
+                : task.consumer(runContext);
+             var dlqProducer = captureSerdeErrors && rBehavior == KafkaConsumerInterface.OnSerdeErrorBehavior.DLQ
+                ? task.dlqProducer(runContext)
+                : null) {
             this.consumer.set(consumer);
             logger.debug("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
 
@@ -452,7 +462,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);
-                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next);
+                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next, dlqProducer);
                 if (hasGroupId) {
                     consumer.commitSync();
                 }

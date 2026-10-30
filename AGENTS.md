@@ -40,7 +40,7 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.kafka.ConsumerGroupList`, `ConsumerGroupDescribe`, `ConsumerGroupAlterOffsets`, `ConsumerGroupDelete`
 - `io.kestra.plugin.kafka.DescribeLogDirs`
 - `io.kestra.plugin.kafka.AbstractKafkaConnectTask` — shared HTTP client/auth/error-handling base for all Kafka Connect REST API tasks (Kafka Connect has no Java admin client)
-- `io.kestra.plugin.kafka.ConnectorCreate`, `ConnectorUpdateConfig`, `ConnectorGetStatus`, `ConnectorPause`, `ConnectorResume`, `ConnectorRestart`, `ConnectorDelete`, `ConnectorList`, `ConnectorGetConfig`, `ConnectorGetOffsets`, `ConnectorAlterOffsets`, `ConnectorResetOffsets`
+- `io.kestra.plugin.kafka.ConnectorCreate`, `ConnectorUpdateConfig`, `ConnectorGetStatus`, `ConnectorPause`, `ConnectorStop`, `ConnectorResume`, `ConnectorRestart`, `ConnectorDelete`, `ConnectorList`, `ConnectorGetConfig`, `ConnectorGetOffsets`, `ConnectorAlterOffsets`, `ConnectorResetOffsets`
 - `io.kestra.plugin.kafka.ConnectorStatusTrigger` — polls a connector's status and fires an execution when it or any of its tasks reaches a target state
 
 ### Project Structure
