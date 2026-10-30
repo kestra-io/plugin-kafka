@@ -902,8 +902,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
             .build();
     }
 
+    @VisibleForTesting
     @SuppressWarnings("RedundantIfStatement")
-    private boolean ended(RunContext runContext, Boolean empty, AtomicInteger count, ZonedDateTime start) throws IllegalVariableEvaluationException {
+    boolean ended(RunContext runContext, Boolean empty, AtomicInteger count, ZonedDateTime start) throws IllegalVariableEvaluationException {
         if (!isActive.get()) {
             return true;
         }
@@ -915,6 +916,11 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         final Optional<Integer> renderedMaxRecords = runContext.render(this.maxRecords).as(Integer.class);
         if (renderedMaxRecords.isPresent() && count.get() > renderedMaxRecords.get()) {
             return true;
+        }
+
+        var rMaxDuration = runContext.render(this.maxDuration).as(Duration.class);
+        if (rMaxDuration.isPresent()) {
+            return Instant.now().isAfter(start.toInstant().plus(rMaxDuration.get()));
         }
 
         final Optional<Duration> renderedPollDuration = runContext.render(this.pollDuration).as(Duration.class);
