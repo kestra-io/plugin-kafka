@@ -38,6 +38,9 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.Collection;
+import java.util.Objects;
+import java.math.BigInteger;
 
 import static io.kestra.core.utils.Rethrow.throwFunction;
 
@@ -369,7 +372,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             if (partitionObj instanceof Byte b) {
                 return b.intValue();
             }
-            if (partitionObj instanceof java.math.BigInteger b) {
+            if (partitionObj instanceof BigInteger b) {
                 return b.intValueExact();
             }
             if (partitionObj instanceof String s) {
@@ -382,7 +385,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     }
 
     private RecordHeader toHeader(Object key, Object value) {
-        if (value instanceof Map || value instanceof java.util.Collection) {
+        if (value instanceof Map || value instanceof Collection) {
             throw new IllegalArgumentException("Invalid header value for key '" + key + "': cannot be a Map or Collection");
         }
         var valBytes = value == null ? null : String.valueOf(value).getBytes(StandardCharsets.UTF_8);
@@ -402,7 +405,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         if (headers instanceof List) {
             return ((List<Map<?, ?>>) headers).stream()
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .flatMap(m -> m.entrySet().stream())
                 .map(e -> toHeader(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());

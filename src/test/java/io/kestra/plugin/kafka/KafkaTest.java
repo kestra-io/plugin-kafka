@@ -13,8 +13,6 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.kafka.registry.AwsGlueSchemaRegistry;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.micronaut.context.annotation.Value;
-import io.kestra.core.utils.IdUtils;
-import io.kestra.core.models.property.Property;
 import jakarta.inject.Inject;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -43,7 +41,6 @@ import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1097,6 +1094,7 @@ public class KafkaTest {
             .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
             .topic(Property.ofValue(topic))
             .from(Map.of("value", "v", "partition", 4294967296L))
+            .transactional(Property.ofValue(false))
             .build();
             
         var ex1 = assertThrows(
@@ -1111,6 +1109,7 @@ public class KafkaTest {
             .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
             .topic(Property.ofValue(topic))
             .from(Map.of("value", "v", "partition", "invalid-string"))
+            .transactional(Property.ofValue(false))
             .build();
             
         var ex2 = assertThrows(
@@ -1131,6 +1130,7 @@ public class KafkaTest {
                 Map.of("value", "v1", "partition", 0L, "headers", nullHeaderMap),
                 Map.of("value", "v2", "partition", "0", "headers", List.of(Collections.emptyMap(), Map.of("valid-head", "val")))
             ))
+            .transactional(Property.ofValue(false))
             .build();
             
         successTask.run(runContext);
@@ -1138,13 +1138,39 @@ public class KafkaTest {
         var consumeTask = Consume.builder()
             .id(IdUtils.create())
             .type(Consume.class.getName())
-            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
-            .topic(Property.ofValue(List.of(topic)))
-            .groupId(Property.ofValue(IdUtils.create()))
+            .properties(Property.ofValue(Map.of(
+                "bootstrap.servers", this.bootstrap,
+                "auto.offset.reset", "earliest"
+            )))
+            .topic(List.of(topic)) 
             .maxRecords(Property.ofValue(2))
             .build();
             
         var consumeOutput = consumeTask.run(runContext);
         assertEquals(2, consumeOutput.getMessagesCount());
+
+        var stream = runContext.storage().getFile(consumeOutput.getUri());
+        List<Map<String, Object>> result = new ArrayList<>();
+        try (var reader = new BufferedReader(new InputStreamReader(stream))) {
+            FileSerde.reader(reader, r -> result.add((Map<String, Object>) r));
+        }
+        
+        assertEquals(2, result.size());
+        
+        var v1 = result.stream().filter(r -> "v1".equals(r.get("value"))).findFirst().orElseThrow();
+        assertEquals(0, v1.get("partition"));
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> v1Headers = (List<Map<String, Object>>) v1.get("headers");
+        assertTrue(v1Headers.stream().anyMatch(h -> "null-head".equals(h.get("key")) && h.get("value") == null), 
+            "v1 should contain null-head with a null value");
+
+        var v2 = result.stream().filter(r -> "v2".equals(r.get("value"))).findFirst().orElseThrow();
+        assertEquals(0, v2.get("partition"));
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> v2Headers = (List<Map<String, Object>>) v2.get("headers");
+        assertTrue(v2Headers.stream().anyMatch(h -> "valid-head".equals(h.get("key")) && "val".equals(h.get("value"))), 
+            "v2 should contain valid-head with value 'val'");
     }
 }
