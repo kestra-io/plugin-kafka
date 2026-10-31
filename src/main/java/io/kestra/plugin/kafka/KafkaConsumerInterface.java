@@ -89,7 +89,11 @@ public interface KafkaConsumerInterface {
 
     @Schema(
         title = "Behavior on serde error",
-        description = "Applies when valueDeserializer is JSON: `SKIPPED` (default), `STORE` to internal storage, or `DLQ` to the configured topic."
+        description = """
+            Applies to value deserialization errors only: `SKIPPED` (default), `STORE` to internal storage, or `DLQ` to the configured topic.
+            Key deserialization errors are not handled.
+            For RealtimeTrigger, `STORE` starts an execution whose `trigger.value` is the stored file URI.
+            """
     )
     @PluginProperty(group = "advanced")
     OnSerdeError getOnSerdeError();

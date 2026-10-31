@@ -1,8 +1,8 @@
 plugins {
-    id 'io.kestra.gradle.repository-conventions' version '1.2.11'
-    id "io.kestra.gradle.plugin-doc-lint" version '1.2.11'
+    id 'io.kestra.gradle.repository-conventions' version '1.2.12'
+    id "io.kestra.gradle.plugin-doc-lint" version '1.2.12'
     id "com.vanniktech.maven.publish" version "0.37.0"
-    id "io.kestra.gradle.inject-bom-versions" version '1.2.11'
+    id "io.kestra.gradle.inject-bom-versions" version '1.2.12'
     id 'java-library'
     id "idea"
     id 'jacoco'
@@ -71,6 +71,8 @@ dependencies {
     api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.9'
 
     implementation 'software.amazon.glue:schema-registry-serde:2.0.1'
+    // CVE-2022-36944: schema-registry-serde pulls scala-library 2.13.1 (via mbknor-jackson-jsonschema_2.13) and the Kestra platform does not pin it
+    implementation 'org.scala-lang:scala-library:2.13.18'
 }
 
 
@@ -106,7 +108,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
     testImplementation group: "io.kestra", name: "scheduler", version: kestraVersion
     testImplementation group: "io.kestra", name: "worker", version: kestraVersion
-    testImplementation "io.kestra.plugin:plugin-docker:1.7.0"
+    testImplementation "io.kestra.plugin:plugin-docker:1.8.1"
     testRuntimeOnly ('com.github.docker-java:docker-java') {
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-netty'
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-jersey'

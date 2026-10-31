@@ -12,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.models.TraceContext;
 import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,6 +23,7 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ShareConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.reactivestreams.Publisher;
@@ -157,6 +159,29 @@ import java.util.concurrent.atomic.AtomicReference;
                     properties:
                       bootstrap.servers: localhost:9092
                 """
+        ),
+        @Example(
+            full = true,
+            title = "Propagate OpenTelemetry trace context from Kafka records to flow executions",
+            code = """
+                id: kafka_realtime_trace_context
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "Received record with headers: {{ trigger.headers }}"
+
+                triggers:
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    groupId: orders-consumer-group
+                    traceContext:
+                      enabled: true
+                """
         )
     }
 )
@@ -255,6 +280,15 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @PluginProperty(group = "processing")
     private Property<Boolean> deduplicate = Property.ofValue(false);
 
+    @Schema(
+        title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution",
+        description = """
+            Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update.
+            """
+    )
+    @PluginProperty(group = "advanced")
+    private TraceContext traceContext;
+
     protected Consume consumeTask() {
         return Consume.builder()
             .id(this.id)
@@ -279,12 +313,55 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Override
     public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) {
-        RunContext runContext = conditionContext.getRunContext();
+        var runContext = conditionContext.getRunContext();
 
-        Consume task = consumeTask();
+        var task = consumeTask();
 
         return Flux.from(publisher(task, runContext))
-            .map((record) -> TriggerService.generateRealtimeExecution(this, conditionContext, context, task.recordToMessage(record)));
+            .map((record) -> {
+                var message = task.recordToMessage(record);
+                var execution = TriggerService.generateRealtimeExecution(this, conditionContext, context, message);
+                propagateTraceContext(runContext, record, message, execution);
+                return execution;
+            });
+    }
+
+    void propagateTraceContext(RunContext runContext,
+                               ConsumerRecord<Object, Object> record,
+                               Message message,
+                               Execution execution) {
+        if (this.traceContext == null) {
+            return;
+        }
+
+        try {
+            var rEnabled = this.traceContext.getEnabled() != null && runContext.render(this.traceContext.getEnabled()).as(Boolean.class).orElse(false);
+            if (!rEnabled) {
+                return;
+            }
+
+            var rTraceparentHeader = this.traceContext.getTraceparentHeader() != null
+                ? runContext.render(this.traceContext.getTraceparentHeader()).as(String.class).orElse("traceparent")
+                : "traceparent";
+
+            var rBodyExtractor = this.traceContext.getBodyExtractor() != null
+                ? runContext.render(this.traceContext.getBodyExtractor()).as(String.class).orElse(null)
+                : null;
+
+            var traceParent = KafkaTraceContextExtractor.extractTraceParent(
+                record,
+                message,
+                rTraceparentHeader,
+                rBodyExtractor,
+                runContext.logger()
+            );
+
+            if (traceParent != null) {
+                execution.setTraceParent(traceParent);
+            }
+        } catch (Exception e) {
+            runContext.logger().debug("Failed to evaluate trace context configuration: {}", e.getMessage());
+        }
     }
 
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
@@ -328,7 +405,16 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                                  FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
         Logger logger = runContext.logger();
         validateGroupId(runContext);
-        try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
+        var captureSerdeErrors = this.onSerdeError != null;
+        var rBehavior = captureSerdeErrors
+            ? runContext.render(this.onSerdeError.getType()).as(KafkaConsumerInterface.OnSerdeErrorBehavior.class).orElse(KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED)
+            : KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED;
+        try (KafkaConsumer<Object, Object> consumer = captureSerdeErrors
+                ? task.consumerWithSerdeErrorCapture(runContext)
+                : task.consumer(runContext);
+             var dlqProducer = captureSerdeErrors && rBehavior == KafkaConsumerInterface.OnSerdeErrorBehavior.DLQ
+                ? task.dlqProducer(runContext)
+                : null) {
             this.consumer.set(consumer);
             logger.debug("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
 
@@ -376,7 +462,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);
-                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next);
+                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, fluxSink::next, dlqProducer);
                 if (hasGroupId) {
                     consumer.commitSync();
                 }
