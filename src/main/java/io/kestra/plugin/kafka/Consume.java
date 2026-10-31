@@ -938,8 +938,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
 
         for (Map.Entry<String, String> entry : filters.entrySet()) {
             var header = headers.lastHeader(entry.getKey());
-            if (header == null) {
-                return false;
+            if (header == null || header.value() == null) {
+                return false; 
             }
             String value = new String(header.value(), StandardCharsets.UTF_8);
             if (!value.equals(entry.getValue())) {
@@ -1065,7 +1065,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     static List<Pair<String, String>> processHeaders(final Headers headers) {
         return StreamSupport
             .stream(headers.spliterator(), false)
-            .map(header -> Pair.of(header.key(), new String(header.value(), StandardCharsets.UTF_8)))
+            .map(header -> Pair.of(header.key(), header.value() == null ? null : new String(header.value(), StandardCharsets.UTF_8)))
             .toList();
     }
 
