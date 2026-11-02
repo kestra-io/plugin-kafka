@@ -939,7 +939,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         for (Map.Entry<String, String> entry : filters.entrySet()) {
             var header = headers.lastHeader(entry.getKey());
             if (header == null || header.value() == null) {
-                return false; 
+                return false;
             }
             String value = new String(header.value(), StandardCharsets.UTF_8);
             if (!value.equals(entry.getValue())) {

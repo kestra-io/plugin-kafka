@@ -1096,9 +1096,9 @@ public class KafkaTest {
             .from(Map.of("value", "v", "partition", 4294967296L))
             .transactional(Property.ofValue(false))
             .build();
-            
+
         var ex1 = assertThrows(
-            IllegalArgumentException.class, 
+            IllegalArgumentException.class,
             () -> failTask.run(runContext)
         );
         assertTrue(ex1.getMessage().contains("expected a non-negative integer"));
@@ -1111,9 +1111,9 @@ public class KafkaTest {
             .from(Map.of("value", "v", "partition", "invalid-string"))
             .transactional(Property.ofValue(false))
             .build();
-            
+
         var ex2 = assertThrows(
-            IllegalArgumentException.class, 
+            IllegalArgumentException.class,
             () -> failTaskNonNumeric.run(runContext)
         );
         assertTrue(ex2.getMessage().contains("expected a non-negative integer"));
@@ -1132,7 +1132,7 @@ public class KafkaTest {
             ))
             .transactional(Property.ofValue(false))
             .build();
-            
+
         successTask.run(runContext);
 
         var consumeTask = Consume.builder()
@@ -1142,35 +1142,34 @@ public class KafkaTest {
                 "bootstrap.servers", this.bootstrap,
                 "auto.offset.reset", "earliest"
             )))
-            .topic(List.of(topic)) 
+            .topic(List.of(topic))
             .maxRecords(Property.ofValue(2))
             .build();
-            
+
         var consumeOutput = consumeTask.run(runContext);
         assertEquals(2, consumeOutput.getMessagesCount());
 
-        var stream = runContext.storage().getFile(consumeOutput.getUri());
         List<Map<String, Object>> result = new ArrayList<>();
-        try (var reader = new BufferedReader(new InputStreamReader(stream))) {
-            FileSerde.reader(reader, r -> result.add((Map<String, Object>) r));
+        try (var stream = new BufferedInputStream(runContext.storage().getFile(consumeOutput.getUri()))) {
+            FileSerde.read(stream, r -> result.add((Map<String, Object>) r));
         }
-        
+
         assertEquals(2, result.size());
-        
+
         var v1 = result.stream().filter(r -> "v1".equals(r.get("value"))).findFirst().orElseThrow();
         assertEquals(0, v1.get("partition"));
-        
+
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> v1Headers = (List<Map<String, Object>>) v1.get("headers");
-        assertTrue(v1Headers.stream().anyMatch(h -> "null-head".equals(h.get("key")) && h.get("value") == null), 
+        assertTrue(v1Headers.stream().anyMatch(h -> h.containsKey("null-head") && h.get("null-head") == null),
             "v1 should contain null-head with a null value");
 
         var v2 = result.stream().filter(r -> "v2".equals(r.get("value"))).findFirst().orElseThrow();
         assertEquals(0, v2.get("partition"));
-        
+
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> v2Headers = (List<Map<String, Object>>) v2.get("headers");
-        assertTrue(v2Headers.stream().anyMatch(h -> "valid-head".equals(h.get("key")) && "val".equals(h.get("value"))), 
+        assertTrue(v2Headers.stream().anyMatch(h -> "val".equals(h.get("valid-head"))),
             "v2 should contain valid-head with value 'val'");
     }
 }
