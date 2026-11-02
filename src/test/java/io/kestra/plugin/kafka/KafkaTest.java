@@ -42,6 +42,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -1094,13 +1095,13 @@ public class KafkaTest {
             .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
             .topic(Property.ofValue(topic))
             .from(Map.of("value", "v", "partition", 4294967296L))
-            .transactional(Property.ofValue(false))
             .build();
 
-        var ex1 = assertThrows(
+        // Transactional by default: the open transaction must be aborted, or close() blocks for the request timeout.
+        var ex1 = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> assertThrows(
             IllegalArgumentException.class,
             () -> failTask.run(runContext)
-        );
+        ));
         assertTrue(ex1.getMessage().contains("expected a non-negative integer"));
 
         var failTaskNonNumeric = Produce.builder()

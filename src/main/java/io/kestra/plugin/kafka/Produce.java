@@ -278,6 +278,16 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             return Output.builder()
                 .messagesCount(count)
                 .build();
+        } catch (Exception e) {
+            // An open transaction makes close() block until the request timeout, so abort it first.
+            if (transactional) {
+                try {
+                    producer.abortTransaction();
+                } catch (Exception abortException) {
+                    e.addSuppressed(abortException);
+                }
+            }
+            throw e;
         } finally {
             producer.close();
         }
