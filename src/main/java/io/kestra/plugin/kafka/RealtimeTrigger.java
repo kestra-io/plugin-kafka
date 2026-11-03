@@ -1,5 +1,6 @@
 package io.kestra.plugin.kafka;
 
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -53,7 +54,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Set `since` (e.g. `"{{ now() }}"`) to read only new records when no `groupId` is used. `since` is rendered again at every trigger start, so with `"{{ now() }}"` records produced while the trigger was down (restart, flow update, deploy) are skipped. Use `groupId` if no record can be lost.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
-        Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
+        Use header filters or `recordFilter` to drop unmatched records before they start an execution. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
         Emits DEBUG logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
         """
 )
@@ -82,6 +83,28 @@ import java.util.concurrent.atomic.AtomicReference;
                     keyDeserializer: STRING
                     valueDeserializer: AVRO
                     groupId: kafkaConsumerGroupId"""
+        ),
+        @Example(
+            full = true,
+            title = "Start a flow only for approved change requests.",
+            code = """
+                id: kafka_realtime_record_filter
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "Approved: {{ trigger.value.id }}"
+
+                triggers:
+                  - id: approved_change_requests
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: change_requests
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    valueDeserializer: JSON
+                    groupId: kestra_change_requests
+                    recordFilter: "{{ trigger.value.event == 'change-request.approved' }}\""""
         ),
         @Example(
             full = true,
@@ -274,8 +297,10 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
         description = """
             Boolean expression rendered for each record, with the record available as `trigger` (`key`, `value`, `headers`,
             `topic`, `partition`, `offset` and `timestamp`), for example `{{ trigger.value.event == 'approved' }}`.
-            Records that render to `false` are skipped and still committed. A record whose expression fails to render is skipped with a warning.
-            It runs after `headerFilters` and deduplication. Records recovered by `onSerdeError` are not filtered."""
+            When unset, every record starts an execution. Records that render to `false` are skipped: committed in `CONSUMER` mode,
+            acknowledged with `ACCEPT` in `SHARE` mode. A record whose expression fails to render, or does not render to a boolean, is skipped the same way with a warning.
+            It runs after `headerFilters` and deduplication. Records recovered by `onSerdeError` are not filtered.
+            Unlike `conditions`, which are evaluated once for the trigger, it sees each record."""
     )
     @PluginProperty(group = "processing")
     private Property<Boolean> recordFilter;
@@ -346,10 +371,11 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             return runContext.render(this.recordFilter).skipCache()
                 .as(Boolean.class, Map.of("trigger", task.recordToMessage(record).toMap()))
                 .orElse(false);
-        } catch (Exception e) {
+        } catch (IllegalVariableEvaluationException e) {
+            // The message can quote the record value, so only its position is logged.
             runContext.logger().warn(
-                "Skipping record at topic {} partition {} offset {}: recordFilter could not be rendered: {}",
-                record.topic(), record.partition(), record.offset(), e.getMessage()
+                "Skipping record at topic {} partition {} offset {}: recordFilter did not render to a boolean.",
+                record.topic(), record.partition(), record.offset()
             );
             return false;
         }

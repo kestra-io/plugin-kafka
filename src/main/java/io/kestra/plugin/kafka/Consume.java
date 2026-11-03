@@ -53,6 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -811,7 +812,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                                ConsumerRecords<Object, Object> records,
                                boolean deduplicate,
                                Map<TopicPartition, Long> lastOffsets,
-                               RecordFilter recordFilter,
+                               Predicate<ConsumerRecord<Object, Object>> recordFilter,
                                RecordHandler onMatchingRecord,
                                KafkaProducer<byte[], byte[]> dlqProducer) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
@@ -870,7 +871,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     int processShareConsumerRecords(RunContext runContext,
                                     ShareConsumer<Object, Object> consumer,
                                     ConsumerRecords<Object, Object> records,
-                                    RecordFilter recordFilter,
+                                    Predicate<ConsumerRecord<Object, Object>> recordFilter,
                                     RecordHandler onMatchingRecord) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
         var rAcknowledgeType = resolveAcknowledgeType(runContext).toKafkaType();
@@ -888,11 +889,6 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
         }
 
         return matchedCount;
-    }
-
-    @FunctionalInterface
-    interface RecordFilter {
-        boolean test(ConsumerRecord<Object, Object> consumerRecord);
     }
 
     @FunctionalInterface

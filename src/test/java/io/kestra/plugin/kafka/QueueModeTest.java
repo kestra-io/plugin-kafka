@@ -5,11 +5,16 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import jakarta.inject.Inject;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.MockShareConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -96,5 +101,25 @@ class QueueModeTest {
         assertThat(runContext.render(consumeTask.getGroupType()).as(GroupType.class).orElseThrow(), is(GroupType.SHARE));
         assertThat(runContext.render(consumeTask.getAcknowledgeType()).as(QueueAcknowledgeType.class).orElseThrow(), is(QueueAcknowledgeType.REJECT));
         assertThat(runContext.render(consumeTask.getDeduplicate()).as(Boolean.class).orElseThrow(), is(true));
+    }
+
+    @Test
+    void shouldAcceptRecordsRejectedByFilterInShareMode() throws Exception {
+        var runContext = runContextFactory.of(Map.of());
+        var task = Consume.builder().topic("orders").build();
+        var records = new ConsumerRecords<Object, Object>(Map.of(
+            new TopicPartition("orders", 0), List.of(
+                new ConsumerRecord<>("orders", 0, 0L, "k1", "approved"),
+                new ConsumerRecord<>("orders", 0, 1L, "k2", "rejected")
+            )
+        ));
+        var shareConsumer = new MockShareConsumer<Object, Object>();
+        task.shareSubscribe(runContext, shareConsumer);
+        var emitted = new ArrayList<Object>();
+
+        var matched = task.processShareConsumerRecords(runContext, shareConsumer, records, record -> "approved".equals(record.value()), record -> emitted.add(record.key()));
+
+        assertThat(matched, is(1));
+        assertThat(emitted, contains("k1"));
     }
 }

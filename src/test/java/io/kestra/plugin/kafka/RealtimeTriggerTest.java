@@ -170,23 +170,26 @@ class RealtimeTriggerTest {
         produce.run(TestsUtils.mockRunContext(runContextFactory, produce, Map.of()));
 
         var runContext = runContextFactory.of(Map.of());
-        try {
-            var keys = Flux.from(trigger.publisher(trigger.consumeTask(), runContext))
+        var keys = new CopyOnWriteArrayList<Object>();
+        try (var admin = AdminClient.create(Map.of("bootstrap.servers", this.bootstrap))) {
+            Flux.from(trigger.publisher(trigger.consumeTask(), runContext))
                 .subscribeOn(Schedulers.boundedElastic())
-                .map(record -> record.key())
-                .take(2)
-                .collectList()
-                .block(Duration.ofMinutes(1));
+                .subscribe(record -> keys.add(record.key()), err -> {});
 
+            // Wait for the commit before stopping, as stop() wakes the consumer up and can interrupt it.
+            // The rejected record is committed too. Produce is transactional, so its commit marker adds one more offset.
+            var deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(1);
+            var committedOffset = -1L;
+            while (System.currentTimeMillis() < deadline && committedOffset < 3) {
+                var committed = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get(30, TimeUnit.SECONDS).get(new TopicPartition(topic, 0));
+                committedOffset = committed == null ? -1L : committed.offset();
+                Thread.sleep(200);
+            }
+
+            assertThat(committedOffset, greaterThanOrEqualTo(3L));
             assertThat(keys, contains("k1", "k3"));
         } finally {
             trigger.stop();
-        }
-
-        try (var admin = AdminClient.create(Map.of("bootstrap.servers", this.bootstrap))) {
-            var committed = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get(30, TimeUnit.SECONDS);
-            // The rejected record is committed too. Produce is transactional, so its commit marker adds one more offset.
-            assertThat(committed.get(new TopicPartition(topic, 0)).offset(), greaterThanOrEqualTo(3L));
         }
     }
 
