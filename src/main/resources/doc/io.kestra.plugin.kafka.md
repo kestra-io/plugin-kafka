@@ -42,3 +42,5 @@ Every task fails with the Connect API's error body verbatim on a non-2xx respons
 ## Triggers
 
 `ConnectorStatusTrigger` polls a connector's status on a fixed interval (default `PT1M`) and fires an execution when the connector or any of its tasks matches `targetState` (case-insensitive), exposing the same typed fields as `ConnectorGetStatus`. A connector deleted mid-poll is treated as no match for that tick, not a trigger failure.
+
+`RealtimeTrigger` consumes Kafka messages as they arrive and starts one execution per record. It supports opt-in OpenTelemetry distributed trace propagation via `traceContext` (`enabled: true`), which extracts a W3C `traceparent` from Kafka record headers (default header `traceparent`) or from a field path in the message body via `bodyExtractor` (e.g. `traceparent` or `trace.parent`). The extracted trace context is set directly on the created execution (`execution.traceParent`), linking downstream workflow traces to upstream Kafka producers (propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update). Missing or invalid trace contexts are logged at debug level and never fail the trigger.

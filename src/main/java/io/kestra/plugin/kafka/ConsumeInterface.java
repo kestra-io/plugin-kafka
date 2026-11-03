@@ -19,14 +19,18 @@ public interface ConsumeInterface extends KafkaConsumerInterface {
 
     @Schema(
         title = "Maximum duration to wait before stopping",
-        description = "Soft limit checked on each poll."
+        description = """
+            Total consume deadline (soft limit checked on each poll). When unset, `pollDuration` is used as the deadline.
+            """
     )
     @PluginProperty(group = "execution")
     Property<Duration> getMaxDuration();
 
     @Schema(
         title = "How often to poll for records",
-        description = "Maximum wait per poll when no records are available."
+        description = """
+            Maximum wait per poll when no records are available. Also acts as the overall consume deadline when `maxDuration` is unset.
+            """
     )
     @NotNull
     @PluginProperty(group = "main")

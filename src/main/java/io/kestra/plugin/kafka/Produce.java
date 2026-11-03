@@ -27,14 +27,17 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.Serializer;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -275,6 +278,16 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
             return Output.builder()
                 .messagesCount(count)
                 .build();
+        } catch (Exception e) {
+            // An open transaction makes close() block until the request timeout, so abort it first.
+            if (transactional) {
+                try {
+                    producer.abortTransaction();
+                } catch (Exception abortException) {
+                    e.addSuppressed(abortException);
+                }
+            }
+            throw e;
         } finally {
             producer.close();
         }
@@ -312,7 +325,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
 
         return new ProducerRecord<>(
             topic,
-            (Integer) map.get("partition"),
+            this.processPartition(map.get("partition")),
             this.processTimestamp(map.get("timestamp")),
             key,
             value,
@@ -352,25 +365,59 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         throw new IllegalArgumentException("Invalid type of timestamp with type '" + timestamp.getClass() + "'");
     }
 
+    private Integer processPartition(Object partitionObj) {
+        if (partitionObj == null) {
+            return null;
+        }
+        try {
+            if (partitionObj instanceof Integer i) {
+                return i;
+            }
+            if (partitionObj instanceof Long l) {
+                return Math.toIntExact(l);
+            }
+            if (partitionObj instanceof Short s) {
+                return s.intValue();
+            }
+            if (partitionObj instanceof Byte b) {
+                return b.intValue();
+            }
+            if (partitionObj instanceof BigInteger b) {
+                return b.intValueExact();
+            }
+            if (partitionObj instanceof String s) {
+                return Integer.parseInt(s.trim());
+            }
+        } catch (ArithmeticException | NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid partition '" + partitionObj + "': expected a non-negative integer", e);
+        }
+        throw new IllegalArgumentException("Invalid partition '" + partitionObj + "': expected a non-negative integer");
+    }
+
+    private RecordHeader toHeader(Object key, Object value) {
+        if (value instanceof Map || value instanceof Collection) {
+            throw new IllegalArgumentException("Invalid header value for key '" + key + "': cannot be a Map or Collection");
+        }
+        var valBytes = value == null ? null : String.valueOf(value).getBytes(StandardCharsets.UTF_8);
+        return new RecordHeader(String.valueOf(key), valBytes);
+    }
+
     private Iterable<Header> processHeaders(Object headers) {
         if (headers == null) {
             return null;
         }
 
-        if (headers instanceof Map) {
-            return ((Map<?, ?>) headers)
-                .entrySet()
-                .stream()
-                .map(o -> new RecordHeader((String) o.getKey(), ((String) o.getValue()).getBytes(StandardCharsets.UTF_8)))
+        if (headers instanceof Map<?, ?> mapHeaders) {
+            return mapHeaders.entrySet().stream()
+                .map(e -> toHeader(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
         }
 
-        // a message coming from a Consume task will have headers as a list of Map
         if (headers instanceof List) {
-            return ((List<Map<String, String>>) headers)
-                .stream()
-                .map(map -> map.entrySet().stream().findAny().get()) // there is only one entry
-                .map(o -> new RecordHeader(o.getKey(), o.getValue().getBytes(StandardCharsets.UTF_8)))
+            return ((List<Map<?, ?>>) headers).stream()
+                .filter(Objects::nonNull)
+                .flatMap(m -> m.entrySet().stream())
+                .map(e -> toHeader(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
         }
 

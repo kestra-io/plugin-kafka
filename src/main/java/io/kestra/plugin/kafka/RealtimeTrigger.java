@@ -12,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.kafka.models.TraceContext;
 import io.kestra.plugin.kafka.registry.SchemaRegistryVendor;
 import io.kestra.plugin.kafka.serdes.SerdeType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,6 +23,7 @@ import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.ShareConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.reactivestreams.Publisher;
@@ -51,7 +53,7 @@ import java.util.concurrent.atomic.AtomicReference;
         Set `since` (e.g. `"{{ now() }}"`) to read only new records when no `groupId` is used. `since` is rendered again at every trigger start, so with `"{{ now() }}"` records produced while the trigger was down (restart, flow update, deploy) are skipped. Use `groupId` if no record can be lost.
         In `groupType: SHARE`, behavior is queue semantics with share groups and explicit acknowledgements.
         In `SHARE` mode, use `topic` with `groupId`; `topicPattern`, `partitions`, and `since` are not supported.
-        Use header filters or `recordFilter` to drop unmatched records before creating executions. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
+        Use header filters to drop unmatched records. Prefer the batch [Kafka Trigger](https://kestra.io/plugins/plugin-kafka/triggers/io.kestra.plugin.kafka.trigger) for interval-based pulls.
         Emits DEBUG logs on startup, subscription, connection confirmation, and shutdown — grep by triggerId to verify Kafka connectivity.
         """
 )
@@ -79,7 +81,6 @@ import java.util.concurrent.atomic.AtomicReference;
                       schema.registry.url: http://localhost:8085
                     keyDeserializer: STRING
                     valueDeserializer: AVRO
-                    recordFilter: "{{ trigger.value.event == 'approved' }}"
                     groupId: kafkaConsumerGroupId"""
         ),
         @Example(
@@ -157,6 +158,29 @@ import java.util.concurrent.atomic.AtomicReference;
                     since: "{{ now() }}"
                     properties:
                       bootstrap.servers: localhost:9092
+                """
+        ),
+        @Example(
+            full = true,
+            title = "Propagate OpenTelemetry trace context from Kafka records to flow executions",
+            code = """
+                id: kafka_realtime_trace_context
+                namespace: company.team
+
+                tasks:
+                  - id: log
+                    type: io.kestra.plugin.core.log.Log
+                    message: "Received record with headers: {{ trigger.headers }}"
+
+                triggers:
+                  - id: realtime_trigger
+                    type: io.kestra.plugin.kafka.RealtimeTrigger
+                    topic: orders
+                    properties:
+                      bootstrap.servers: localhost:9092
+                    groupId: orders-consumer-group
+                    traceContext:
+                      enabled: true
                 """
         )
     }
@@ -248,12 +272,11 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Schema(
         title = "Filter records before creating executions",
         description = """
-            A Pebble expression evaluated for each Kafka record.
-            The record is available under `trigger`, including its key, value, headers,
-            topic, partition, timestamp, and offset.
-            Records for which the expression evaluates to false are skipped.
-            """
-        )
+            Boolean expression rendered for each record, with the record available as `trigger` (`key`, `value`, `headers`,
+            `topic`, `partition`, `offset` and `timestamp`), for example `{{ trigger.value.event == 'approved' }}`.
+            Records that render to `false` are skipped and still committed. A record whose expression fails to render is skipped with a warning.
+            It runs after `headerFilters` and deduplication. Records recovered by `onSerdeError` are not filtered."""
+    )
     @PluginProperty(group = "processing")
     private Property<Boolean> recordFilter;
 
@@ -267,6 +290,15 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<Boolean> deduplicate = Property.ofValue(false);
+
+    @Schema(
+        title = "Extract OpenTelemetry trace context from Kafka records and propagate to the execution",
+        description = """
+            Propagation takes effect on Kestra 1.3.x; support on Kestra 2.0.x is pending a core update.
+            """
+    )
+    @PluginProperty(group = "advanced")
+    private TraceContext traceContext;
 
     protected Consume consumeTask() {
         return Consume.builder()
@@ -292,31 +324,73 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
 
     @Override
     public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) {
-        RunContext runContext = conditionContext.getRunContext();
+        var runContext = conditionContext.getRunContext();
 
-        Consume task = consumeTask();
+        var task = consumeTask();
 
         return Flux.from(publisher(task, runContext))
-            .map((record) -> TriggerService.generateRealtimeExecution(this, conditionContext, context, task.recordToMessage(record)));
+            .map((record) -> {
+                var message = task.recordToMessage(record);
+                var execution = TriggerService.generateRealtimeExecution(this, conditionContext, context, message);
+                propagateTraceContext(runContext, record, message, execution);
+                return execution;
+            });
     }
 
-    boolean matchesRecord(
-        RunContext runContext,
-        Consume task,
-        ConsumerRecord<Object, Object> record
-    ) throws Exception {
+    boolean matchesRecord(RunContext runContext, Consume task, ConsumerRecord<Object, Object> record) {
         if (this.recordFilter == null) {
             return true;
         }
+        try {
+            // skipCache, otherwise every record gets the result rendered for the first one.
+            return runContext.render(this.recordFilter).skipCache()
+                .as(Boolean.class, Map.of("trigger", task.recordToMessage(record).toMap()))
+                .orElse(false);
+        } catch (Exception e) {
+            runContext.logger().warn(
+                "Skipping record at topic {} partition {} offset {}: recordFilter could not be rendered: {}",
+                record.topic(), record.partition(), record.offset(), e.getMessage()
+            );
+            return false;
+        }
+    }
 
-        Map<String, Object> variables = Map.of(
-            "trigger",
-            task.recordToMessage(record)
-        );
+    void propagateTraceContext(RunContext runContext,
+                               ConsumerRecord<Object, Object> record,
+                               Message message,
+                               Execution execution) {
+        if (this.traceContext == null) {
+            return;
+        }
 
-        return Boolean.TRUE.equals(
-            Property.as(this.recordFilter, runContext, Boolean.class, variables)
-        );
+        try {
+            var rEnabled = this.traceContext.getEnabled() != null && runContext.render(this.traceContext.getEnabled()).as(Boolean.class).orElse(false);
+            if (!rEnabled) {
+                return;
+            }
+
+            var rTraceparentHeader = this.traceContext.getTraceparentHeader() != null
+                ? runContext.render(this.traceContext.getTraceparentHeader()).as(String.class).orElse("traceparent")
+                : "traceparent";
+
+            var rBodyExtractor = this.traceContext.getBodyExtractor() != null
+                ? runContext.render(this.traceContext.getBodyExtractor()).as(String.class).orElse(null)
+                : null;
+
+            var traceParent = KafkaTraceContextExtractor.extractTraceParent(
+                record,
+                message,
+                rTraceparentHeader,
+                rBodyExtractor,
+                runContext.logger()
+            );
+
+            if (traceParent != null) {
+                execution.setTraceParent(traceParent);
+            }
+        } catch (Exception e) {
+            runContext.logger().debug("Failed to evaluate trace context configuration: {}", e.getMessage());
+        }
     }
 
     public Publisher<ConsumerRecord<Object, Object>> publisher(final Consume task,
@@ -360,7 +434,16 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                                  FluxSink<ConsumerRecord<Object, Object>> fluxSink) throws Exception {
         Logger logger = runContext.logger();
         validateGroupId(runContext);
-        try (KafkaConsumer<Object, Object> consumer = task.consumer(runContext)) {
+        var captureSerdeErrors = this.onSerdeError != null;
+        var rBehavior = captureSerdeErrors
+            ? runContext.render(this.onSerdeError.getType()).as(KafkaConsumerInterface.OnSerdeErrorBehavior.class).orElse(KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED)
+            : KafkaConsumerInterface.OnSerdeErrorBehavior.SKIPPED;
+        try (KafkaConsumer<Object, Object> consumer = captureSerdeErrors
+                ? task.consumerWithSerdeErrorCapture(runContext)
+                : task.consumer(runContext);
+             var dlqProducer = captureSerdeErrors && rBehavior == KafkaConsumerInterface.OnSerdeErrorBehavior.DLQ
+                ? task.dlqProducer(runContext)
+                : null) {
             this.consumer.set(consumer);
             logger.debug("Kafka consumer created for triggerId={} groupId={} groupType=CONSUMER", this.id, runContext.render(this.groupId).as(String.class).orElse(null));
 
@@ -408,14 +491,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
             Map<TopicPartition, Long> lastOffsets = new HashMap<>();
             runPollingLoop(() -> {
                 var records = consumer.poll(POLL_DURATION);
-                task.processConsumerRecords(
-                    runContext,
-                    records,
-                    deduplicate,
-                    lastOffsets,
-                    record -> matchesRecord(runContext, task, record),
-                    fluxSink::next
-                );
+                task.processConsumerRecords(runContext, records, deduplicate, lastOffsets, record -> matchesRecord(runContext, task, record), fluxSink::next, dlqProducer);
                 if (hasGroupId) {
                     consumer.commitSync();
                 }
@@ -458,13 +534,7 @@ public class RealtimeTrigger extends AbstractTrigger implements RealtimeTriggerI
                 if (!records.isEmpty() && firstShareBatch.compareAndSet(false, true)) {
                     logger.debug("Kafka SHARE connection confirmed for triggerId={}: first batch received ({} records)", this.id, records.count());
                 }
-                task.processShareConsumerRecords(
-                    runContext,
-                    consumer,
-                    records,
-                    record -> matchesRecord(runContext, task, record),
-                    fluxSink::next
-                );
+                task.processShareConsumerRecords(runContext, consumer, records, record -> matchesRecord(runContext, task, record), fluxSink::next);
                 consumer.commitSync();
             });
         }
