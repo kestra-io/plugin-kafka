@@ -13,6 +13,7 @@ import io.kestra.core.queues.QueueInterface;
 import io.kestra.core.repositories.LocalFlowRepositoryLoader;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.core.utils.TestsUtils;
 import io.kestra.plugin.kafka.serdes.SerdeType;
@@ -20,7 +21,9 @@ import io.micronaut.context.annotation.Value;
 import io.kestra.core.junit.annotations.KestraTest;
 import jakarta.inject.Inject;
 import jakarta.inject.Named;
+import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.Test;
 import org.reactivestreams.Publisher;
 import org.slf4j.LoggerFactory;
@@ -93,6 +96,101 @@ class RealtimeTriggerTest {
         assertThat(executionList.stream()
             .anyMatch(execution -> "key2".equals(execution.getTrigger().getVariables().get("key"))), is(true));
         receive.blockLast();
+    }
+
+    @Test
+    void shouldFilterRecordsUsingRecordValue() throws Exception {
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .recordFilter(Property.ofExpression(
+                "{{ trigger.value.event == 'approved' }}"
+            ))
+            .build();
+
+        var runContext = runContextFactory.of(Map.of());
+        var task = trigger.consumeTask();
+
+        var approvedRecord = new ConsumerRecord<Object, Object>(
+            "orders", 0, 1L, "key-1",
+            Map.of("event", "approved")
+        );
+
+        var rejectedRecord = new ConsumerRecord<Object, Object>(
+            "orders", 0, 2L, "key-2",
+            Map.of("event", "rejected")
+        );
+
+        assertThat(trigger.matchesRecord(runContext, task, approvedRecord), is(true));
+        assertThat(trigger.matchesRecord(runContext, task, rejectedRecord), is(false));
+    }
+
+    @Test
+    void shouldSkipRecordWhenFilterFailsToRender() {
+        var trigger = RealtimeTrigger.builder()
+            .id(IdUtils.create())
+            .type(RealtimeTrigger.class.getName())
+            .recordFilter(Property.ofExpression("{{ trigger.value.event.missing == 'approved' }}"))
+            .build();
+        var record = new ConsumerRecord<Object, Object>("orders", 0, 1L, "key-1", "not-a-map");
+
+        assertThat(trigger.matchesRecord(runContextFactory.of(Map.of()), trigger.consumeTask(), record), is(false));
+    }
+
+    @Test
+    void shouldFilterEachRecordWhenFilterComesFromYaml() throws Exception {
+        var topic = "tu_filter_%s".formatted(IdUtils.create());
+        var groupId = "test-group-%s".formatted(IdUtils.create());
+        var trigger = JacksonMapper.ofYaml().readValue("""
+            id: filter
+            type: io.kestra.plugin.kafka.RealtimeTrigger
+            topic: %s
+            groupId: %s
+            properties:
+              bootstrap.servers: %s
+              auto.offset.reset: earliest
+            keyDeserializer: STRING
+            valueDeserializer: STRING
+            recordFilter: "{{ trigger.value == 'approved' }}"
+            """.formatted(topic, groupId, this.bootstrap), RealtimeTrigger.class);
+
+        var produce = Produce.builder()
+            .id(IdUtils.create())
+            .type(Produce.class.getName())
+            .properties(Property.ofValue(Map.of("bootstrap.servers", this.bootstrap)))
+            .keySerializer(Property.ofValue(SerdeType.STRING))
+            .valueSerializer(Property.ofValue(SerdeType.STRING))
+            .topic(Property.ofValue(topic))
+            .from(List.of(
+                Map.of("key", "k1", "value", "approved"),
+                Map.of("key", "k2", "value", "rejected"),
+                Map.of("key", "k3", "value", "approved")
+            ))
+            .build();
+        produce.run(TestsUtils.mockRunContext(runContextFactory, produce, Map.of()));
+
+        var runContext = runContextFactory.of(Map.of());
+        var keys = new CopyOnWriteArrayList<Object>();
+        try (var admin = AdminClient.create(Map.of("bootstrap.servers", this.bootstrap))) {
+            Flux.from(trigger.publisher(trigger.consumeTask(), runContext))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(record -> keys.add(record.key()), err -> {});
+
+            // Wait for the commit before stopping, as stop() wakes the consumer up and can interrupt it.
+            // The rejected record is committed too. Produce is transactional, so its commit marker adds one more offset.
+            var deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(1);
+            var committedOffset = -1L;
+            while (System.currentTimeMillis() < deadline && committedOffset < 3) {
+                var committed = admin.listConsumerGroupOffsets(groupId).partitionsToOffsetAndMetadata().get(30, TimeUnit.SECONDS).get(new TopicPartition(topic, 0));
+                committedOffset = committed == null ? -1L : committed.offset();
+                Thread.sleep(200);
+            }
+
+            assertThat(committedOffset, greaterThanOrEqualTo(3L));
+            assertThat(keys, contains("k1", "k3"));
+        } finally {
+            trigger.stop();
+        }
     }
 
     @Test

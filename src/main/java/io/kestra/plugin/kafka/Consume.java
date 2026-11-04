@@ -53,6 +53,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -611,7 +612,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                             }
                             records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
                             empty = records.isEmpty();
-                            total.addAndGet(processConsumerRecords(runContext, records, deduplicate, lastOffsets, consumerRecord -> {
+                            total.addAndGet(processConsumerRecords(runContext, records, deduplicate, lastOffsets, consumerRecord -> true, consumerRecord -> {
                                 FileSerde.write(output, this.recordToMessage(consumerRecord));
                                 count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
                             }, null));
@@ -682,7 +683,7 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                             }
                             records = consumer.poll(runContext.render(this.pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5)));
                             empty = records.isEmpty();
-                            total.addAndGet(processShareConsumerRecords(runContext, consumer, records, consumerRecord -> {
+                            total.addAndGet(processShareConsumerRecords(runContext, consumer, records, consumerRecord -> true, consumerRecord -> {
                                 FileSerde.write(output, this.recordToMessage(consumerRecord));
                                 count.compute(consumerRecord.topic(), (s, integer) -> integer == null ? 1 : integer + 1);
                             }));
@@ -810,7 +811,8 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     int processConsumerRecords(RunContext runContext,
                                ConsumerRecords<Object, Object> records,
                                boolean deduplicate,
-                                Map<TopicPartition, Long> lastOffsets,
+                               Map<TopicPartition, Long> lastOffsets,
+                               Predicate<ConsumerRecord<Object, Object>> recordFilter,
                                RecordHandler onMatchingRecord,
                                KafkaProducer<byte[], byte[]> dlqProducer) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
@@ -856,6 +858,9 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
                 continue;
             }
 
+            if (!recordFilter.test(consumerRecord)) {
+                continue;
+            }
             onMatchingRecord.accept(consumerRecord);
             matchedCount++;
         }
@@ -866,13 +871,14 @@ public class Consume extends AbstractKafkaConnection implements RunnableTask<Con
     int processShareConsumerRecords(RunContext runContext,
                                     ShareConsumer<Object, Object> consumer,
                                     ConsumerRecords<Object, Object> records,
+                                    Predicate<ConsumerRecord<Object, Object>> recordFilter,
                                     RecordHandler onMatchingRecord) throws Exception {
         var rHeaderFilters = runContext.render(headerFilters).asMap(String.class, String.class);
         var rAcknowledgeType = resolveAcknowledgeType(runContext).toKafkaType();
         var matchedCount = 0;
 
         for (var consumerRecord : records) {
-            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters)) {
+            if (!matchHeaders(consumerRecord.headers(), rHeaderFilters) || !recordFilter.test(consumerRecord)) {
                 consumer.acknowledge(consumerRecord, AcknowledgeType.ACCEPT);
                 continue;
             }

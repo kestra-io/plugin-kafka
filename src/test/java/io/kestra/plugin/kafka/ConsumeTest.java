@@ -470,6 +470,7 @@ class ConsumeTest {
             records,
             true,
             new HashMap<>(),
+            consumerRecord -> true,
             matchedRecords::add,
             null
         );
@@ -493,6 +494,7 @@ class ConsumeTest {
             records,
             true,
             new HashMap<>(),
+            consumerRecord -> true,
             matchedRecords::add,
             null
         );
