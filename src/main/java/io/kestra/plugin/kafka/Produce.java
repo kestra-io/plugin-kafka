@@ -298,10 +298,7 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
     }
 
 
-    /**
-     * A registry vendor returns a bare serializer that only accepts Avro objects, but the value of a flow is a plain map.
-     * Keep the map to record conversion in front of it, as is done when no vendor is set.
-     */
+    // A vendor serializer only accepts Avro objects, so keep the map to record conversion in front of it.
     static Serializer<Object> vendorValueSerializer(Serializer<Object> vendorSerializer, SerdeType valueSerdeType, @Nullable AvroSchema valueAvroSchema) {
         if (valueSerdeType != SerdeType.AVRO || valueAvroSchema == null) {
             return vendorSerializer;

@@ -4,7 +4,6 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import io.confluent.kafka.schemaregistry.avro.AvroSchema;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.plugin.kafka.registry.AwsGlueSchemaRegistry;
 import io.kestra.plugin.kafka.serdes.MapToGenericRecordSerializer;
@@ -64,7 +63,7 @@ class ProduceVendorSerializerTest {
                     }
                     """)));
 
-        AwsGlueSchemaRegistry registry = AwsGlueSchemaRegistry.builder()
+        var registry = AwsGlueSchemaRegistry.builder()
             .type(AwsGlueSchemaRegistry.class.getName())
             .region(Property.ofValue("eu-west-1"))
             .endpoint(Property.ofValue("http://localhost:" + glue.port()))
@@ -72,8 +71,8 @@ class ProduceVendorSerializerTest {
             .secretKey(Property.ofValue("dummy"))
             .build();
 
-        RunContext runContext = runContextFactory.of();
-        Serializer<Object> vendor = (Serializer<Object>) registry.getSerializer(runContext, SerdeType.AVRO);
+        var runContext = runContextFactory.of();
+        var vendor = (Serializer<Object>) registry.getSerializer(runContext, SerdeType.AVRO);
         vendor.configure(Map.of(
             "dataFormat", "AVRO",
             "schemaName", "twitter_schema",
@@ -84,26 +83,26 @@ class ProduceVendorSerializerTest {
 
     @Test
     void vendorSerializerAcceptsTheMapOfAFlow() throws Exception {
-        WireMockServer glue = new WireMockServer(options().dynamicPort());
+        var glue = new WireMockServer(options().dynamicPort());
         glue.start();
         try {
-            Serializer<Object> vendor = glueSerializer(glue);
+            var vendor = glueSerializer(glue);
             // the value of a flow is a plain map, not an Avro object
-            Map<String, Object> value = Map.of("username", "bob", "tweet", "hello");
+            var value = Map.<String, Object>of("username", "bob", "tweet", "hello");
 
             // this is the failure of the issue: the bare vendor serializer rejects a map
             assertThrows(RuntimeException.class, () -> vendor.serialize("topic", value));
 
-            Serializer<Object> wrapped = Produce.vendorValueSerializer(vendor, SerdeType.AVRO, new AvroSchema(AVRO_SCHEMA));
+            var wrapped = Produce.vendorValueSerializer(vendor, SerdeType.AVRO, new AvroSchema(AVRO_SCHEMA));
 
-            byte[] bytes = wrapped.serialize("topic", value);
+            var bytes = wrapped.serialize("topic", value);
             assertNotNull(bytes);
             // the Glue wire format starts with a header version byte of 3
             assertEquals(3, bytes[0]);
             assertTrue(bytes.length > 18, "expected the Glue header and the encoded record");
 
             // the producer calls this overload, so it must convert the map too
-            byte[] withHeaders = wrapped.serialize("topic", new RecordHeaders(), value);
+            var withHeaders = wrapped.serialize("topic", new RecordHeaders(), value);
             assertNotNull(withHeaders);
             assertEquals(3, withHeaders[0]);
         } finally {
@@ -113,7 +112,7 @@ class ProduceVendorSerializerTest {
 
     @Test
     void onlyAvroWithASchemaIsWrapped() {
-        Serializer<Object> vendor = new RecordingSerializer();
+        var vendor = new RecordingSerializer();
 
         assertSame(vendor, Produce.vendorValueSerializer(vendor, SerdeType.JSON, new AvroSchema(AVRO_SCHEMA)));
         assertSame(vendor, Produce.vendorValueSerializer(vendor, SerdeType.AVRO, null));
@@ -122,16 +121,16 @@ class ProduceVendorSerializerTest {
 
     @Test
     void headersAreForwardedToTheDelegate() {
-        RecordingSerializer delegate = new RecordingSerializer();
-        Serializer<Object> wrapped = new MapToGenericRecordSerializer(delegate, new AvroSchema(AVRO_SCHEMA).rawSchema());
-        Headers headers = new RecordHeaders().add("trace", "abc".getBytes());
+        var delegate = new RecordingSerializer();
+        var wrapped = new MapToGenericRecordSerializer(delegate, new AvroSchema(AVRO_SCHEMA).rawSchema());
+        var headers = new RecordHeaders().add("trace", "abc".getBytes());
 
         wrapped.serialize("topic", headers, Map.of("username", "bob", "tweet", "hello"));
 
         assertEquals(1, delegate.withHeaders.size());
         assertEquals(0, delegate.withoutHeaders.size());
         assertSame(headers, delegate.seenHeaders);
-        GenericRecord record = assertInstanceOf(GenericRecord.class, delegate.withHeaders.getFirst());
+        var record = assertInstanceOf(GenericRecord.class, delegate.withHeaders.getFirst());
         assertEquals("bob", record.get("username"));
     }
 
