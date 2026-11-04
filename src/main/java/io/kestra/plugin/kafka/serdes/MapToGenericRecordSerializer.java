@@ -9,6 +9,7 @@ import org.apache.avro.generic.GenericArray;
 import org.apache.avro.generic.GenericEnumSymbol;
 import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.serialization.Serializer;
 
 public class MapToGenericRecordSerializer implements Serializer<Object> {
@@ -33,6 +34,11 @@ public class MapToGenericRecordSerializer implements Serializer<Object> {
     @Override
     public byte[] serialize(String topic, Object data) {
         return serializer.serialize(topic, buildValue(schema, data));
+    }
+
+    @Override
+    public byte[] serialize(String topic, Headers headers, Object data) {
+        return serializer.serialize(topic, headers, buildValue(schema, data));
     }
 
     @Override
