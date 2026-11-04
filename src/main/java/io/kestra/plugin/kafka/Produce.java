@@ -226,7 +226,11 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         var valueSerializer = (Serializer<Object>) getTypedSerializer(valueSerdeType, valueAvroSchema);
 
         if (schemaRegistryVendor != null) {
-            valueSerializer = (Serializer<Object>) schemaRegistryVendor.getSerializer(runContext, valueSerdeType);
+            valueSerializer = vendorValueSerializer(
+                (Serializer<Object>) schemaRegistryVendor.getSerializer(runContext, valueSerdeType),
+                valueSerdeType,
+                valueAvroSchema
+            );
         }
 
         var serdesMap = serdesProperties.entrySet()
@@ -293,6 +297,17 @@ public class Produce extends AbstractKafkaConnection implements RunnableTask<Pro
         }
     }
 
+
+    /**
+     * A registry vendor returns a bare serializer that only accepts Avro objects, but the value of a flow is a plain map.
+     * Keep the map to record conversion in front of it, as is done when no vendor is set.
+     */
+    static Serializer<Object> vendorValueSerializer(Serializer<Object> vendorSerializer, SerdeType valueSerdeType, @Nullable AvroSchema valueAvroSchema) {
+        if (valueSerdeType != SerdeType.AVRO || valueAvroSchema == null) {
+            return vendorSerializer;
+        }
+        return new MapToGenericRecordSerializer(vendorSerializer, valueAvroSchema.rawSchema());
+    }
 
     @Nullable
     private static AvroSchema parseAvroSchema(RunContext runContext, @Nullable Property<String> avroSchema) throws IllegalVariableEvaluationException {
