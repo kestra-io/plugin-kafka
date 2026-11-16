@@ -96,7 +96,7 @@ tasks:
       max.poll.records: "10"
     keyDeserializer: STRING
     valueDeserializer: STRING
-    pollDuration: PT5S
+    pollDuration: PT30S
     maxRecords: 3
 
   - id: consume_filtered
@@ -109,7 +109,7 @@ tasks:
       max.poll.records: "10"
     keyDeserializer: STRING
     valueDeserializer: STRING
-    pollDuration: PT5S
+    pollDuration: PT30S
     maxRecords: 2
     headerFilters:
       match: "yes"
