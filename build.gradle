@@ -108,7 +108,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
     testImplementation group: "io.kestra", name: "scheduler", version: kestraVersion
     testImplementation group: "io.kestra", name: "worker", version: kestraVersion
-    testImplementation "io.kestra.plugin:plugin-docker:1.8.4"
+    testImplementation "io.kestra.plugin:plugin-docker:1.8.5"
     testRuntimeOnly ('com.github.docker-java:docker-java') {
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-netty'
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-jersey'
@@ -140,7 +140,7 @@ configurations.all {
     // SEC-0150/SEC-0151: platform BOM pins httpcore5 5.4.1, remove once it ships >= 5.4.3.
     resolutionStrategy.force "org.apache.httpcomponents.core5:httpcore5:5.4.4", "org.apache.httpcomponents.core5:httpcore5-h2:5.4.4"
     // SEC-0369: platform BOM pins guava 33.4.8-jre, remove once it ships >= 33.7.2.
-    resolutionStrategy.force "com.google.guava:guava:33.7.2-jre"
+    resolutionStrategy.force "com.google.guava:guava:33.8.0-jre"
     // SEC-0370: platform BOM pins snappy-java 1.1.10.7 (via kafka-clients), remove once it ships >= 1.1.10.9.
     resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.9"
     resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
