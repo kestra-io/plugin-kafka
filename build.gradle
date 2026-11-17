@@ -70,7 +70,7 @@ dependencies {
     implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
     api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.9'
 
-    implementation 'software.amazon.glue:schema-registry-serde:2.0.1'
+    implementation 'software.amazon.glue:schema-registry-serde:2.0.2'
     // CVE-2022-36944: schema-registry-serde pulls scala-library 2.13.1 (via mbknor-jackson-jsonschema_2.13) and the Kestra platform does not pin it
     implementation 'org.scala-lang:scala-library:3.10.0'
 }
@@ -108,7 +108,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
     testImplementation group: "io.kestra", name: "scheduler", version: kestraVersion
     testImplementation group: "io.kestra", name: "worker", version: kestraVersion
-    testImplementation "io.kestra.plugin:plugin-docker:1.8.5"
+    testImplementation "io.kestra.plugin:plugin-docker:1.8.6"
     testRuntimeOnly ('com.github.docker-java:docker-java') {
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-netty'
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-jersey'
