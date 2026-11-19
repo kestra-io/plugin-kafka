@@ -68,11 +68,11 @@ dependencies {
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jdk8'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
     implementation 'com.fasterxml.jackson.module:jackson-module-parameter-names'
-    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.3.9'
+    api group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '2.4.0'
 
-    implementation 'software.amazon.glue:schema-registry-serde:2.0.1'
+    implementation 'software.amazon.glue:schema-registry-serde:2.0.2'
     // CVE-2022-36944: schema-registry-serde pulls scala-library 2.13.1 (via mbknor-jackson-jsonschema_2.13) and the Kestra platform does not pin it
-    implementation 'org.scala-lang:scala-library:3.10.0'
+    implementation 'org.scala-lang:scala-library:3.10.1'
 }
 
 
@@ -108,7 +108,7 @@ dependencies {
     testImplementation group: "io.kestra", name: "storage-local", version: kestraVersion
     testImplementation group: "io.kestra", name: "scheduler", version: kestraVersion
     testImplementation group: "io.kestra", name: "worker", version: kestraVersion
-    testImplementation "io.kestra.plugin:plugin-docker:1.8.5"
+    testImplementation "io.kestra.plugin:plugin-docker:1.8.6"
     testRuntimeOnly ('com.github.docker-java:docker-java') {
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-netty'
         exclude group: 'com.github.docker-java', module: 'docker-java-transport-jersey'
@@ -144,7 +144,7 @@ configurations.all {
     // SEC-0370: platform BOM pins snappy-java 1.1.10.7 (via kafka-clients), remove once it ships >= 1.1.10.9.
     resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.9"
     // SEC-0139: lz4-java < 1.11.4 (via kafka-clients / glue schema-registry-serde), remove once the platform ships >= 1.11.4.
-    resolutionStrategy.force "at.yawk.lz4:lz4-java:1.11.4"
+    resolutionStrategy.force "at.yawk.lz4:lz4-java:1.14.0"
     resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
         select(candidates.find { it.id.group == 'org.lz4' } ?: candidates.first())
     }
