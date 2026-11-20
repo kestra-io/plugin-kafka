@@ -1,5 +1,6 @@
-# POC (do not merge): publish this plugin to a public Artifact Registry repository in the GCP sandbox
-# project, to validate hosting plugins outside Maven Central. Runs on pushes to the POC branch only.
+# POC (do not merge): publish this plugin through the shared publish-java action of
+# kestra-io/actions#400 to the sandbox Artifact Registry repository, with the plugin's build left
+# unchanged. Only the Kestra repository is targeted, so nothing goes to Maven Central.
 name: POC - Publish to sandbox Artifact Registry
 
 on:
@@ -13,6 +14,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # A stable version that will never exist on Central, so "latest" resolution can be tested too.
+      ORG_GRADLE_PROJECT_version: '1.99.0'
     steps:
       - name: Checkout - Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -22,17 +26,12 @@ jobs:
         with:
           java-enabled: true
 
-      - name: GCP - Auth with github service account
-        uses: 'google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093' # v3.0.0
+      - name: Publish - Java
+        uses: kestra-io/actions/composite/publish-java@feat/plugins-maven-repositories
         with:
-          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Publish - Sandbox Artifact Registry
-        run: |
-          VERSION="1.16.6-sandbox.${GITHUB_RUN_NUMBER}"
-          ./gradlew publishAllPublicationsToKestraSandboxRepository -PsandboxPublish -Pversion="${VERSION}" --no-daemon
-          {
-            echo "### Published \`io.kestra.plugin:plugin-kafka:${VERSION}\`"
-            echo
-            echo "https://europe-west1-maven.pkg.dev/kestra-sandbox/kestra-plugins-public/io/kestra/plugin/plugin-kafka/${VERSION}/plugin-kafka-${VERSION}.jar"
-          } >> "$GITHUB_STEP_SUMMARY"
+          is-private: 'false'
+          maven-repositories: kestra
+          gcp-service-account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          sonatype-gpg-keyid: ${{ secrets.SONATYPE_GPG_KEYID }}
+          sonatype-gpg-password: ${{ secrets.SONATYPE_GPG_PASSWORD }}
+          sonatype-gpg-file: ${{ secrets.SONATYPE_GPG_FILE }}

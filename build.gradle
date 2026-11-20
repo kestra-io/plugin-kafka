@@ -9,11 +9,9 @@ plugins {
     id "com.gradleup.shadow" version "9.6.1"
     id 'signing'
     id 'net.researchgate.release' version '3.2.0'
-    id "com.google.cloud.artifactregistry.gradle-plugin" version "2.2.5"
 }
 
 def isBuildSnapshot = version.toString().endsWith("-SNAPSHOT")
-def sandboxPublish = project.hasProperty("sandboxPublish")
 
 repositories {
     mavenLocal()
@@ -171,10 +169,7 @@ jacocoTestReport {
  **********************************************************************************************************************/
 mavenPublishing {
     publishToMavenCentral(true)
-    // POC: the sandbox Artifact Registry repository takes unsigned artifacts, and CI has no GPG key on that path.
-    if (!sandboxPublish) {
-        signAllPublications()
-    }
+    signAllPublications()
     coordinates("${project.group}", "${project.name}", "${project.version}")
     pom {
         name = "${project.name}"
@@ -196,19 +191,6 @@ mavenPublishing {
         scm {
             connection = 'scm:git:'
             url = "https://github.com/kestra-io/${project.name}"
-        }
-    }
-}
-
-// POC: opt-in publication to a public Artifact Registry repository in the GCP sandbox project, to validate
-// hosting plugins outside Maven Central. Only active with -PsandboxPublish; normal releases are unchanged.
-if (sandboxPublish) {
-    publishing {
-        repositories {
-            maven {
-                name = "kestraSandbox"
-                url = "artifactregistry://europe-west1-maven.pkg.dev/kestra-sandbox/kestra-plugins-public"
-            }
         }
     }
 }
