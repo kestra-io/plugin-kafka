@@ -1,0 +1,37 @@
+# POC (do not merge): publish this plugin through the shared publish-java action of
+# kestra-io/actions#400 to the sandbox Artifact Registry repository, with the plugin's build left
+# unchanged. Only the Kestra repository is targeted, so nothing goes to Maven Central.
+name: POC - Publish to sandbox Artifact Registry
+
+on:
+  push:
+    branches:
+      - poc/sandbox-artifact-registry
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # A stable version that will never exist on Central, so "latest" resolution can be tested too.
+      ORG_GRADLE_PROJECT_version: '1.99.0'
+    steps:
+      - name: Checkout - Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup - Build
+        uses: kestra-io/actions/composite/setup-build@main
+        with:
+          java-enabled: true
+
+      - name: Publish - Java
+        uses: kestra-io/actions/composite/publish-java@feat/plugins-maven-repositories
+        with:
+          is-private: 'false'
+          maven-repositories: kestra
+          gcp-service-account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          sonatype-gpg-keyid: ${{ secrets.SONATYPE_GPG_KEYID }}
+          sonatype-gpg-password: ${{ secrets.SONATYPE_GPG_PASSWORD }}
+          sonatype-gpg-file: ${{ secrets.SONATYPE_GPG_FILE }}
