@@ -142,7 +142,7 @@ configurations.all {
     // SEC-0369: platform BOM pins guava 33.4.8-jre, remove once it ships >= 33.7.2.
     resolutionStrategy.force "com.google.guava:guava:33.8.0-jre"
     // SEC-0370: platform BOM pins snappy-java 1.1.10.7 (via kafka-clients), remove once it ships >= 1.1.10.9.
-    resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.9"
+    resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.12"
     // SEC-0139: lz4-java < 1.11.4 (via kafka-clients / glue schema-registry-serde), remove once the platform ships >= 1.11.4.
     resolutionStrategy.force "at.yawk.lz4:lz4-java:1.14.0"
     resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
