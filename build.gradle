@@ -138,13 +138,13 @@ configurations.all {
     // The enforced Kestra platform pins kafka-clients to 4.1.1 (vulnerable to a JWT validation bypass, fixed in 4.1.2)
     resolutionStrategy.force "org.apache.kafka:kafka-clients:4.4.0"
     // SEC-0150/SEC-0151: platform BOM pins httpcore5 5.4.1, remove once it ships >= 5.4.3.
-    resolutionStrategy.force "org.apache.httpcomponents.core5:httpcore5:5.4.4", "org.apache.httpcomponents.core5:httpcore5-h2:5.4.4"
+    resolutionStrategy.force "org.apache.httpcomponents.core5:httpcore5:5.5", "org.apache.httpcomponents.core5:httpcore5-h2:5.5"
     // SEC-0369: platform BOM pins guava 33.4.8-jre, remove once it ships >= 33.7.2.
     resolutionStrategy.force "com.google.guava:guava:33.8.0-jre"
     // SEC-0370: platform BOM pins snappy-java 1.1.10.7 (via kafka-clients), remove once it ships >= 1.1.10.9.
     resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.12"
     // SEC-0139: lz4-java < 1.11.4 (via kafka-clients / glue schema-registry-serde), remove once the platform ships >= 1.11.4.
-    resolutionStrategy.force "at.yawk.lz4:lz4-java:1.14.0"
+    resolutionStrategy.force "at.yawk.lz4:lz4-java:1.14.1"
     resolutionStrategy.capabilitiesResolution.withCapability('org.lz4:lz4-java') {
         select(candidates.find { it.id.group == 'org.lz4' } ?: candidates.first())
     }
